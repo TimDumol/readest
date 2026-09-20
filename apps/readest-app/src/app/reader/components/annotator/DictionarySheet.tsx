@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import type { DictionaryEntry } from '@/services/dictionaries/types';
+import type { SelectionSnapshot } from '@/services/studyCards/types';
 
 import Dialog from '@/components/Dialog';
 import {
@@ -14,10 +16,23 @@ interface DictionarySheetProps {
   lang?: string;
   onDismiss: () => void;
   onManage?: () => void;
+  selectionSnapshot?: SelectionSnapshot;
+  onCreateStudyCard?: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
+  autoGenerateStudyCard?: boolean;
+  onAutoGenerateStudyCard?: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
 }
 
-const DictionarySheet: React.FC<DictionarySheetProps> = ({ word, lang, onDismiss, onManage }) => {
-  const state = useDictionaryResults({ word, lang });
+const DictionarySheet: React.FC<DictionarySheetProps> = ({
+  word,
+  lang,
+  onDismiss,
+  onManage,
+  selectionSnapshot,
+  onCreateStudyCard,
+  autoGenerateStudyCard,
+  onAutoGenerateStudyCard,
+}) => {
+  const state = useDictionaryResults({ word, lang, selectionSnapshot });
   return (
     <Dialog
       isOpen
@@ -30,6 +45,7 @@ const DictionarySheet: React.FC<DictionarySheetProps> = ({ word, lang, onDismiss
           // the header isn't pulled up into the top edge.
           headerClassName='-mt-4 sm:mt-0'
           currentWord={state.currentWord}
+          setQuery={state.setQuery}
           canGoBack={state.canGoBack}
           goBack={state.goBack}
           onManage={onManage}
@@ -40,7 +56,12 @@ const DictionarySheet: React.FC<DictionarySheetProps> = ({ word, lang, onDismiss
       contentClassName='px-0! mt-0!'
       onClose={onDismiss}
     >
-      <DictionaryResultsBody {...state} />
+      <DictionaryResultsBody
+        {...state}
+        onCreateStudyCard={onCreateStudyCard}
+        autoGenerateStudyCard={autoGenerateStudyCard}
+        onAutoGenerateStudyCard={onAutoGenerateStudyCard}
+      />
     </Dialog>
   );
 };

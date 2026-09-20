@@ -35,7 +35,10 @@ vi.mock('@ai-sdk/openai-compatible', () => ({
 
 import { OllamaProvider } from '@/services/ai/providers/OllamaProvider';
 import { AIGatewayProvider } from '@/services/ai/providers/AIGatewayProvider';
-import { OpenRouterProvider } from '@/services/ai/providers/OpenRouterProvider';
+import {
+  filterOpenRouterModels,
+  OpenRouterProvider,
+} from '@/services/ai/providers/OpenRouterProvider';
 import { getAIProvider } from '@/services/ai/providers';
 import type { AISettings } from '@/services/ai/types';
 import { DEFAULT_AI_SETTINGS } from '@/services/ai/constants';
@@ -255,6 +258,23 @@ describe('OpenRouterProvider', () => {
 
     await provider.healthCheck();
     expect(mockFetch).toHaveBeenCalledWith('https://example.com/v1/models', expect.any(Object));
+  });
+
+  test('filters models by name and ID while preserving the selected model', () => {
+    const models = [
+      { id: 'openai/gpt-4o-mini', name: 'GPT-4o mini' },
+      { id: 'qwen/qwen3.5-flash', name: 'Qwen 3.5 Flash' },
+    ];
+
+    expect(filterOpenRouterModels(models, 'qwen').map((model) => model.id)).toEqual([
+      'qwen/qwen3.5-flash',
+    ]);
+    expect(filterOpenRouterModels(models, 'gpt-4o-mini').map((model) => model.id)).toEqual([
+      'openai/gpt-4o-mini',
+    ]);
+    expect(
+      filterOpenRouterModels(models, 'no match', 'openai/gpt-4o-mini').map((model) => model.id),
+    ).toEqual(['openai/gpt-4o-mini']);
   });
 });
 

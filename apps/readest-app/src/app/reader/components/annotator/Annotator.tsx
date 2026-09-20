@@ -58,6 +58,24 @@ import { runSimpleCC } from '@/utils/simplecc';
 import { getWordCount, isSingleLookupTerm } from '@/utils/word';
 import { getIndexFromCfi } from '@/utils/cfi';
 import { writeTextToClipboard } from '@/utils/clipboard';
+import { captureSelectionSnapshot } from '@/services/studyCards/selectionContext';
+import type { SelectionSnapshot } from '@/services/studyCards/types';
+import type { DictionaryEntry } from '@/services/dictionaries/types';
+import { buildStudyCardDraft } from '@/services/studyCards/draftBuilder';
+import {
+  buildStudyCardAdditionalContext,
+  generateStudyCardClozeCached,
+} from '@/services/studyCards/aiCloze';
+import {
+  DEFAULT_AI_SETTINGS,
+  DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD,
+  DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+  DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+} from '@/services/ai/constants';
+import {
+  fetchOpenRouterModels,
+  type OpenRouterModelPricing,
+} from '@/services/ai/providers/OpenRouterProvider';
 import { buildAnnotationUrl } from '@/utils/deeplink';
 import { DEFAULT_NOTE_EXPORT_CONFIG } from '@/services/constants';
 import { canShareText, shareSelectedText } from '@/utils/share';
@@ -91,6 +109,7 @@ import SelectionRangeEditor from './SelectionRangeEditor';
 import AnnotationPopup from './AnnotationPopup';
 import DictionaryPopup from './DictionaryPopup';
 import DictionarySheet from './DictionarySheet';
+import StudyCardDialog from './studyCards/StudyCardDialog';
 import NoteEditorSheet from './NoteEditorSheet';
 import TranslatorPopup from './TranslatorPopup';
 import useShortcuts from '@/hooks/useShortcuts';
@@ -177,6 +196,12 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   const [translationEpoch, setTranslationEpoch] = useState(0);
   const [showAnnotPopup, setShowAnnotPopup] = useState(false);
   const [showDictionaryPopup, setShowDictionaryPopup] = useState(false);
+  const [dictionarySelectionSnapshot, setDictionarySelectionSnapshot] =
+    useState<SelectionSnapshot | null>(null);
+  const [studyCardState, setStudyCardState] = useState<{
+    snapshot: SelectionSnapshot;
+    entries: DictionaryEntry[];
+  } | null>(null);
   const [showDeepLPopup, setShowDeepLPopup] = useState(false);
   const [showProofreadPopup, setShowProofreadPopup] = useState(false);
   const [trianglePosition, setTrianglePosition] = useState<Position>();
@@ -231,7 +256,11 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   const pendingWordLensDictRef = useRef(false);
 
   const showingPopup =
-    showAnnotPopup || showDictionaryPopup || showDeepLPopup || showProofreadPopup;
+    showAnnotPopup ||
+    showDictionaryPopup ||
+    showDeepLPopup ||
+    showProofreadPopup ||
+    !!studyCardState;
 
   const popupPadding = useResponsiveSize(10);
   const trianglePadding = popupPadding * 2 + 6;
@@ -380,6 +409,8 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
       setShowAnnotationNotes(false);
       setAnnotationNotes([]);
       setShowDictionaryPopup(false);
+      setDictionarySelectionSnapshot(null);
+      setStudyCardState(null);
       setShowDeepLPopup(false);
       setShowProofreadPopup(false);
       setEditingAnnotation(null);
@@ -1661,8 +1692,100 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     eventDispatcher.dispatch('search-term', { term, bookKey });
   };
 
+  const autoGenerateStudyCardForDictionary = useCallback(
+    async (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => {
+      const aiSettings = settings.aiSettings ?? DEFAULT_AI_SETTINGS;
+      const apiKey = aiSettings.openrouterApiKey;
+      const model = aiSettings.openrouterModel;
+      if (
+        snapshot.status !== 'ready' ||
+        !snapshot.contextText ||
+        !apiKey?.trim() ||
+        !model?.trim()
+      ) {
+        return;
+      }
+      const definitions = entries.map((entry) => ({
+        entryId: entry.id,
+        providerId: entry.providerId,
+        sourceLabel: entry.sourceLabel,
+        headword: entry.headword,
+        text: entry.definitionText,
+        included: true,
+      }));
+      const draft = buildStudyCardDraft(snapshot, definitions);
+      const surroundingContext = buildStudyCardAdditionalContext({
+        contextText: snapshot.contextText,
+        sentenceSpan: snapshot.sentenceSpan,
+        beforeChars:
+          aiSettings.studyCardClozeContextBeforeChars ?? DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+        afterChars:
+          aiSettings.studyCardClozeContextAfterChars ?? DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+      });
+      let pricing: OpenRouterModelPricing | undefined;
+      let reasoningEffort: 'low' | undefined;
+      try {
+        const models = await fetchOpenRouterModels(
+          aiSettings.openrouterBaseUrl || DEFAULT_AI_SETTINGS.openrouterBaseUrl!,
+          apiKey,
+        );
+        const selectedModel = models.find((candidate) => candidate.id === model);
+        pricing = selectedModel?.pricing;
+        if (
+          selectedModel?.supported_parameters?.includes('reasoning_effort') ||
+          selectedModel?.supported_parameters?.includes('reasoning')
+        ) {
+          reasoningEffort = 'low';
+        }
+      } catch {
+        // Completion can still proceed if the model metadata request fails.
+      }
+      void generateStudyCardClozeCached({
+        enriched: true,
+        apiKey,
+        model,
+        baseUrl: aiSettings.openrouterBaseUrl,
+        contextText: draft.contextText,
+        selectedText: draft.selectedText,
+        prompt: aiSettings.studyCardClozePrompt || DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+        additionalContextBefore: surroundingContext.before,
+        additionalContextAfter: surroundingContext.after,
+        reasoningEffort,
+        budgetUsd: aiSettings.studyCardClozeBudgetUsd ?? DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD,
+        pricing,
+        provider: aiSettings.studyCardClozeProvider,
+        sourceText: draft.sourceText,
+        targetLanguage: settings.globalViewSettings.translateTargetLang || 'EN',
+        definitions: definitions.map((definition) => ({
+          sourceLabel: definition.sourceLabel,
+          headword: definition.headword,
+          text: definition.text,
+        })),
+      }).catch((error) => {
+        console.warn('Failed to pre-generate study card cloze:', error);
+      });
+    },
+    [settings],
+  );
+
   const handleDictionary = () => {
     if (!selection || !selection.text) return;
+    const chapter = bookData.bookDoc?.toc?.find((item) => item.index === selection.index);
+    const snapshot = captureSelectionSnapshot(
+      selection,
+      {
+        bookTitle: bookData.book?.title,
+        chapterTitle: chapter?.label,
+        bookHash: bookData.book?.hash,
+        sectionIndex: selection.index,
+        cfi: selection.cfi,
+        href: selection.href,
+      },
+      primaryLang,
+    );
+    // Capture synchronously before native handle suppression or dictionary
+    // mounting. Query edits and headword navigation must not mutate it.
+    setDictionarySelectionSnapshot(snapshot);
     // System-dictionary path: when the user has opted in via Settings →
     // Languages → Dictionaries, hand the selection to the OS instead of
     // opening the in-app popup. Exclusivity is enforced at the store
@@ -1687,6 +1810,18 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
     setShowAnnotPopup(false);
     void suppressNativeSelectionHandles();
     setShowDictionaryPopup(true);
+  };
+
+  const handleCreateStudyCard = (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => {
+    setDictionarySelectionSnapshot(null);
+    setStudyCardState({ snapshot, entries });
+    setShowDictionaryPopup(false);
+    setShowAnnotPopup(false);
+  };
+
+  const handleCloseStudyCard = () => {
+    setStudyCardState(null);
+    handleDismissPopupShowToolbar();
   };
 
   const handleTranslation = () => {
@@ -2415,6 +2550,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   // and TTS spend the selection (TTS deselects deliberately), and highlight /
   // annotate replace it with the created annotation — so they are not here.
   const handleDismissPopupShowToolbar = () => {
+    setDictionarySelectionSnapshot(null);
     // The instant dictionary is the one lookup that deselects as it opens, so
     // its dismiss has to put the range back before the check below — otherwise
     // the word it just defined can never be highlighted or copied (#6213).
@@ -2441,7 +2577,11 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
   // toolbar: hide them while any of those is open, and let them come back with
   // the toolbar (or go with the dismiss).
   const overlaySurfaceOpen =
-    showDictionaryPopup || showDeepLPopup || showProofreadPopup || !!noteEditorTarget;
+    showDictionaryPopup ||
+    showDeepLPopup ||
+    showProofreadPopup ||
+    !!noteEditorTarget ||
+    !!studyCardState;
 
   // Below `sm` (or short landscape) the note editor is a bottom sheet rather
   // than a popup pinned to the selection: an anchored editor would sit under
@@ -2478,6 +2618,12 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
                 lang={bookData.bookDoc?.metadata.language as string}
                 onDismiss={handleDismissPopupShowToolbar}
                 onManage={onManage}
+                selectionSnapshot={dictionarySelectionSnapshot ?? undefined}
+                onCreateStudyCard={handleCreateStudyCard}
+                autoGenerateStudyCard={
+                  settings.aiSettings?.studyCardAutoGenerateOnDictionaryOpen ?? false
+                }
+                onAutoGenerateStudyCard={autoGenerateStudyCardForDictionary}
               />
             );
           }
@@ -2492,9 +2638,29 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
               popupHeight={dictPopupHeight}
               onDismiss={handleDismissPopupShowToolbar}
               onManage={onManage}
+              selectionSnapshot={dictionarySelectionSnapshot ?? undefined}
+              onCreateStudyCard={handleCreateStudyCard}
+              autoGenerateStudyCard={
+                settings.aiSettings?.studyCardAutoGenerateOnDictionaryOpen ?? false
+              }
+              onAutoGenerateStudyCard={autoGenerateStudyCardForDictionary}
             />
           );
         })()}
+      {studyCardState && (
+        <StudyCardDialog
+          snapshot={studyCardState.snapshot}
+          entries={studyCardState.entries.map((entry) => ({
+            entryId: entry.id,
+            providerId: entry.providerId,
+            sourceLabel: entry.sourceLabel,
+            headword: entry.headword,
+            text: entry.definitionText,
+            included: true,
+          }))}
+          onClose={handleCloseStudyCard}
+        />
+      )}
       {showDeepLPopup && trianglePosition && translatorPopupPosition && (
         <TranslatorPopup
           bookKey={bookKey}

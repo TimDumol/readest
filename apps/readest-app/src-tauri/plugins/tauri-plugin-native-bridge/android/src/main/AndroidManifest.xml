@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="com.ichi2.anki.permission.READ_WRITE_DATABASE" />
     <!-- Make dictionary / text-processing apps (Eudic, 欧路词典, GoldenDict,
          Pleco, etc.) visible to queryIntentActivities under Android 11+
          package-visibility filtering. Without this declaration only the
@@ -8,6 +9,7 @@
          browser on some OEM ROMs even when a dictionary is installed
          (issue #4559). -->
     <queries>
+        <package android:name="com.ichi2.anki" />
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />

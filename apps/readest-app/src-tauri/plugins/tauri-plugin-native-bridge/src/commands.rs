@@ -249,6 +249,58 @@ pub(crate) async fn show_lookup_popover<R: Runtime>(
 }
 
 #[command]
+pub(crate) async fn anki_get_status<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<AnkiDroidStatusResponse> {
+    app.native_bridge().anki_get_status()
+}
+
+#[command]
+pub(crate) async fn anki_request_permission<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<AnkiDroidPermissionResponse> {
+    app.native_bridge().anki_request_permission()
+}
+
+#[command]
+pub(crate) async fn anki_list_decks<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<AnkiDroidDecksResponse> {
+    app.native_bridge().anki_list_decks()
+}
+
+#[command]
+pub(crate) async fn anki_list_models<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<AnkiDroidModelsResponse> {
+    app.native_bridge().anki_list_models()
+}
+
+#[command]
+pub(crate) async fn anki_check_duplicate<R: Runtime>(
+    app: AppHandle<R>,
+    payload: AnkiDroidCheckDuplicateRequest,
+) -> Result<AnkiDroidDuplicateResponse> {
+    app.native_bridge().anki_check_duplicate(payload)
+}
+
+#[command]
+pub(crate) async fn anki_ensure_study_model<R: Runtime>(
+    app: AppHandle<R>,
+    payload: AnkiDroidStudyModelRequest,
+) -> Result<AnkiDroidStudyModelResponse> {
+    app.native_bridge().anki_ensure_study_model(payload)
+}
+
+#[command]
+pub(crate) async fn anki_add_note<R: Runtime>(
+    app: AppHandle<R>,
+    payload: AnkiDroidAddNoteRequest,
+) -> Result<AnkiDroidAddNoteResponse> {
+    app.native_bridge().anki_add_note(payload)
+}
+
+#[command]
 pub(crate) async fn select_directory<R: Runtime>(
     app: AppHandle<R>,
     callback_state: State<'_, DirectoryCallbackState<R>>,

@@ -26,7 +26,7 @@ import {
   DEFAULT_EINK_VIEW_SETTINGS,
   DEFAULT_VIEW_SETTINGS_CONFIG,
 } from './constants';
-import { DEFAULT_AI_SETTINGS } from './ai/constants';
+import { DEFAULT_AI_SETTINGS, migrateStudyCardPrompt } from './ai/constants';
 import { getTargetLang, isCJKEnv } from '@/utils/misc';
 import { safeLoadJSON, safeSaveJSON } from './persistence';
 
@@ -163,6 +163,7 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
     ...DEFAULT_AI_SETTINGS,
     ...settings.aiSettings,
   };
+  let shouldSaveSettings = migrateStudyCardPrompt(settings.aiSettings);
 
   settings.localBooksDir = await ctx.fs.getPrefix('Books');
 
@@ -189,16 +190,20 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
 
   if (!settings.kosync.deviceId) {
     settings.kosync.deviceId = uuidv4();
-    await saveSettings(ctx.fs, settings);
+    shouldSaveSettings = true;
   }
 
   if (!settings.bookorbit.deviceId) {
     settings.bookorbit.deviceId = uuidv4();
-    await saveSettings(ctx.fs, settings);
+    shouldSaveSettings = true;
   }
 
   if (!settings.replicaDeviceId) {
     settings.replicaDeviceId = uuidv4();
+    shouldSaveSettings = true;
+  }
+
+  if (shouldSaveSettings) {
     await saveSettings(ctx.fs, settings);
   }
 

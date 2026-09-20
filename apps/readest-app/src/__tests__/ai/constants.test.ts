@@ -35,7 +35,14 @@ vi.mock('@/store/settingsStore', () => {
 });
 
 import type { AISettings } from '@/services/ai/types';
-import { DEFAULT_AI_SETTINGS, GATEWAY_MODELS } from '@/services/ai/constants';
+import {
+  DEFAULT_AI_SETTINGS,
+  DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+  GATEWAY_MODELS,
+  getStudyCardPrompt,
+  LEGACY_STUDY_CARD_CLOZE_PROMPT,
+  migrateStudyCardPrompt,
+} from '@/services/ai/constants';
 
 describe('DEFAULT_AI_SETTINGS', () => {
   test('should have enabled set to false by default', () => {
@@ -65,6 +72,27 @@ describe('Model constants', () => {
     expect(GATEWAY_MODELS.GROK_4_1_FAST).toBeDefined();
     expect(GATEWAY_MODELS.DEEPSEEK_V3_2).toBeDefined();
     expect(GATEWAY_MODELS.QWEN_3_235B).toBeDefined();
+  });
+});
+
+describe('study-card prompt migration', () => {
+  test('replaces the built-in single-card prompt with the enriched prompt', () => {
+    const settings = { studyCardClozePrompt: LEGACY_STUDY_CARD_CLOZE_PROMPT } as AISettings;
+
+    expect(migrateStudyCardPrompt(settings)).toBe(true);
+    expect(settings.studyCardClozePrompt).toBe(DEFAULT_STUDY_CARD_CLOZE_PROMPT);
+    expect(getStudyCardPrompt(LEGACY_STUDY_CARD_CLOZE_PROMPT)).toBe(
+      DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+    );
+  });
+
+  test('preserves a user-customized prompt', () => {
+    const customPrompt = 'Use my custom study-card instructions.';
+    const settings = { studyCardClozePrompt: customPrompt } as AISettings;
+
+    expect(migrateStudyCardPrompt(settings)).toBe(false);
+    expect(settings.studyCardClozePrompt).toBe(customPrompt);
+    expect(getStudyCardPrompt(customPrompt)).toBe(customPrompt);
   });
 });
 

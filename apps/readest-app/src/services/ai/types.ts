@@ -1,4 +1,5 @@
 import type { LanguageModel, EmbeddingModel } from 'ai';
+import type { StudyCardProviderPreferences } from '../studyCards/providerRouting';
 
 export type AIProviderName = 'ollama' | 'ai-gateway' | 'openrouter';
 
@@ -33,6 +34,15 @@ export interface AISettings {
   openrouterBaseUrl?: string;
   openrouterModel?: string;
   openrouterEmbeddingModel?: string;
+
+  /** Advanced settings for AI-generated cloze study cards. */
+  studyCardClozePrompt?: string;
+  studyCardClozeContextBeforeChars?: number;
+  studyCardClozeContextAfterChars?: number;
+  studyCardClozeBudgetUsd?: number;
+  studyCardClozeProvider?: StudyCardProviderPreferences;
+  studyCardAutoGenerateOnOpen?: boolean;
+  studyCardAutoGenerateOnDictionaryOpen?: boolean;
 
   spoilerProtection: boolean;
   maxContextChunks: number;

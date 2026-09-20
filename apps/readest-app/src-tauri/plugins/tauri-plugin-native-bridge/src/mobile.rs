@@ -325,6 +325,59 @@ impl<R: Runtime> NativeBridge<R> {
 }
 
 impl<R: Runtime> NativeBridge<R> {
+    pub fn anki_get_status(&self) -> crate::Result<AnkiDroidStatusResponse> {
+        self.0
+            .run_mobile_plugin("anki_get_status", ())
+            .map_err(Into::into)
+    }
+
+    pub fn anki_request_permission(&self) -> crate::Result<AnkiDroidPermissionResponse> {
+        self.0
+            .run_mobile_plugin("anki_request_permission", ())
+            .map_err(Into::into)
+    }
+
+    pub fn anki_list_decks(&self) -> crate::Result<AnkiDroidDecksResponse> {
+        self.0
+            .run_mobile_plugin("anki_list_decks", ())
+            .map_err(Into::into)
+    }
+
+    pub fn anki_list_models(&self) -> crate::Result<AnkiDroidModelsResponse> {
+        self.0
+            .run_mobile_plugin("anki_list_models", ())
+            .map_err(Into::into)
+    }
+
+    pub fn anki_ensure_study_model(
+        &self,
+        payload: AnkiDroidStudyModelRequest,
+    ) -> crate::Result<AnkiDroidStudyModelResponse> {
+        self.0
+            .run_mobile_plugin("anki_ensure_study_model", payload)
+            .map_err(Into::into)
+    }
+
+    pub fn anki_check_duplicate(
+        &self,
+        payload: AnkiDroidCheckDuplicateRequest,
+    ) -> crate::Result<AnkiDroidDuplicateResponse> {
+        self.0
+            .run_mobile_plugin("anki_check_duplicate", payload)
+            .map_err(Into::into)
+    }
+
+    pub fn anki_add_note(
+        &self,
+        payload: AnkiDroidAddNoteRequest,
+    ) -> crate::Result<AnkiDroidAddNoteResponse> {
+        self.0
+            .run_mobile_plugin("anki_add_note", payload)
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
     // Android only. Fire-and-forget: the picked URIs are delivered via the
     // `file-picker-result` plugin event so they survive activity/process
     // recreation behind the system picker (#1217).

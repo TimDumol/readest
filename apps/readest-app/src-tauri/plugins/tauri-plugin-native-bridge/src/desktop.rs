@@ -229,6 +229,43 @@ impl<R: Runtime> NativeBridge<R> {
         Err(crate::Error::UnsupportedPlatformError)
     }
 
+    pub fn anki_get_status(&self) -> crate::Result<AnkiDroidStatusResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn anki_request_permission(&self) -> crate::Result<AnkiDroidPermissionResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn anki_list_decks(&self) -> crate::Result<AnkiDroidDecksResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn anki_list_models(&self) -> crate::Result<AnkiDroidModelsResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn anki_ensure_study_model(
+        &self,
+        _payload: AnkiDroidStudyModelRequest,
+    ) -> crate::Result<AnkiDroidStudyModelResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn anki_check_duplicate(
+        &self,
+        _payload: AnkiDroidCheckDuplicateRequest,
+    ) -> crate::Result<AnkiDroidDuplicateResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn anki_add_note(
+        &self,
+        _payload: AnkiDroidAddNoteRequest,
+    ) -> crate::Result<AnkiDroidAddNoteResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
     pub fn select_directory(&self) -> crate::Result<SelectDirectoryResponse> {
         Err(crate::Error::UnsupportedPlatformError)
     }

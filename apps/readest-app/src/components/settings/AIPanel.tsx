@@ -8,10 +8,23 @@ import { useEnv } from '@/context/EnvContext';
 import { getAIProvider } from '@/services/ai/providers';
 import {
   fetchOpenRouterModels,
+  filterOpenRouterModels,
+  formatOpenRouterModelPrice,
   type OpenRouterModelInfo,
 } from '@/services/ai/providers/OpenRouterProvider';
-import { DEFAULT_AI_SETTINGS, GATEWAY_MODELS, MODEL_PRICING } from '@/services/ai/constants';
+import {
+  DEFAULT_AI_SETTINGS,
+  DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD,
+  DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+  DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+  GATEWAY_MODELS,
+  MAX_STUDY_CARD_CLOZE_BUDGET_USD,
+  MAX_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+  MIN_STUDY_CARD_CLOZE_BUDGET_USD,
+  MODEL_PRICING,
+} from '@/services/ai/constants';
 import type { AISettings, AIProviderName } from '@/services/ai/types';
+import type { StudyCardProviderSort } from '@/services/studyCards/providerRouting';
 import { exportReedyMetricsBundle } from '@/services/reedy/instrumentation';
 import { isTauriAppPlatform } from '@/services/environment';
 import { BoxedList, SettingLabel, SettingsRow, SettingsSwitchRow } from './primitives';
@@ -20,6 +33,30 @@ type ConnectionStatus = 'idle' | 'testing' | 'success' | 'error';
 type CustomModelStatus = 'idle' | 'validating' | 'valid' | 'invalid';
 
 const CUSTOM_MODEL_VALUE = '__custom__';
+
+const parseProviderList = (value: string): string[] => [
+  ...new Set(
+    value
+      .split(/[\n,]/)
+      .map((provider) => provider.trim())
+      .filter(Boolean),
+  ),
+];
+
+const buildStudyCardProviderPreferences = (
+  onlyValue: string,
+  ignoreValue: string,
+  sort: StudyCardProviderSort | '',
+): AISettings['studyCardClozeProvider'] => {
+  const only = parseProviderList(onlyValue);
+  const ignore = parseProviderList(ignoreValue);
+  if (!only.length && !ignore.length && !sort) return undefined;
+  return {
+    ...(only.length ? { only } : {}),
+    ...(ignore.length ? { ignore } : {}),
+    ...(sort ? { sort } : {}),
+  };
+};
 
 interface ModelOption {
   id: string;
@@ -97,8 +134,35 @@ const AIPanel: React.FC = () => {
     aiSettings.openrouterEmbeddingModel ?? '',
   );
   const [openrouterModels, setOpenrouterModels] = useState<OpenRouterModelInfo[]>([]);
+  const [openrouterModelSearch, setOpenrouterModelSearch] = useState('');
   const [openrouterFetchingModels, setOpenrouterFetchingModels] = useState(false);
   const [openrouterModelsError, setOpenrouterModelsError] = useState('');
+  const [studyCardClozePrompt, setStudyCardClozePrompt] = useState(
+    aiSettings.studyCardClozePrompt ?? DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+  );
+  const [studyCardClozeContextBeforeChars, setStudyCardClozeContextBeforeChars] = useState(
+    aiSettings.studyCardClozeContextBeforeChars ?? DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+  );
+  const [studyCardClozeContextAfterChars, setStudyCardClozeContextAfterChars] = useState(
+    aiSettings.studyCardClozeContextAfterChars ?? DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+  );
+  const [studyCardClozeBudgetUsd, setStudyCardClozeBudgetUsd] = useState(
+    aiSettings.studyCardClozeBudgetUsd ?? DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD,
+  );
+  const [studyCardProviderOnly, setStudyCardProviderOnly] = useState(
+    (aiSettings.studyCardClozeProvider?.only ?? []).join(', '),
+  );
+  const [studyCardProviderIgnore, setStudyCardProviderIgnore] = useState(
+    (aiSettings.studyCardClozeProvider?.ignore ?? []).join(', '),
+  );
+  const [studyCardProviderSort, setStudyCardProviderSort] = useState<StudyCardProviderSort | ''>(
+    aiSettings.studyCardClozeProvider?.sort ?? '',
+  );
+  const [studyCardAutoGenerateOnOpen, setStudyCardAutoGenerateOnOpen] = useState(
+    aiSettings.studyCardAutoGenerateOnOpen ?? false,
+  );
+  const [studyCardAutoGenerateOnDictionaryOpen, setStudyCardAutoGenerateOnDictionaryOpen] =
+    useState(aiSettings.studyCardAutoGenerateOnDictionaryOpen ?? false);
 
   const savedCustomModel = aiSettings.aiGatewayCustomModel ?? '';
   const savedModel = aiSettings.aiGatewayModel ?? DEFAULT_AI_SETTINGS.aiGatewayModel ?? '';
@@ -122,6 +186,11 @@ const AIPanel: React.FC = () => {
 
   const isMounted = useRef(false);
   const modelOptions = getModelOptions();
+  const visibleOpenrouterModels = filterOpenRouterModels(
+    openrouterModels,
+    openrouterModelSearch,
+    openrouterModel,
+  );
 
   const settingsRef = useRef(settings);
   useEffect(() => {
@@ -287,6 +356,81 @@ const AIPanel: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openrouterEmbeddingModel]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    if (
+      studyCardClozePrompt !== (aiSettings.studyCardClozePrompt ?? DEFAULT_STUDY_CARD_CLOZE_PROMPT)
+    ) {
+      saveAiSetting('studyCardClozePrompt', studyCardClozePrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardClozePrompt]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    if (
+      studyCardClozeContextBeforeChars !==
+      (aiSettings.studyCardClozeContextBeforeChars ?? DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS)
+    ) {
+      saveAiSetting('studyCardClozeContextBeforeChars', studyCardClozeContextBeforeChars);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardClozeContextBeforeChars]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    if (
+      studyCardClozeContextAfterChars !==
+      (aiSettings.studyCardClozeContextAfterChars ?? DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS)
+    ) {
+      saveAiSetting('studyCardClozeContextAfterChars', studyCardClozeContextAfterChars);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardClozeContextAfterChars]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    if (
+      studyCardClozeBudgetUsd !==
+      (aiSettings.studyCardClozeBudgetUsd ?? DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD)
+    ) {
+      saveAiSetting('studyCardClozeBudgetUsd', studyCardClozeBudgetUsd);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardClozeBudgetUsd]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    const providerPreferences = buildStudyCardProviderPreferences(
+      studyCardProviderOnly,
+      studyCardProviderIgnore,
+      studyCardProviderSort,
+    );
+    if (JSON.stringify(providerPreferences) !== JSON.stringify(aiSettings.studyCardClozeProvider)) {
+      saveAiSetting('studyCardClozeProvider', providerPreferences);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardProviderIgnore, studyCardProviderOnly, studyCardProviderSort]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    if (studyCardAutoGenerateOnOpen !== (aiSettings.studyCardAutoGenerateOnOpen ?? false)) {
+      saveAiSetting('studyCardAutoGenerateOnOpen', studyCardAutoGenerateOnOpen);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardAutoGenerateOnOpen]);
+
+  useEffect(() => {
+    if (!isMounted.current) return;
+    if (
+      studyCardAutoGenerateOnDictionaryOpen !==
+      (aiSettings.studyCardAutoGenerateOnDictionaryOpen ?? false)
+    ) {
+      saveAiSetting('studyCardAutoGenerateOnDictionaryOpen', studyCardAutoGenerateOnDictionaryOpen);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyCardAutoGenerateOnDictionaryOpen]);
 
   // Get the effective model ID to use (either selected or custom)
   const getEffectiveModelId = useCallback(() => {
@@ -668,18 +812,39 @@ const AIPanel: React.FC = () => {
           <div className='flex flex-col gap-2 pe-4 py-3'>
             <SettingLabel>{_('LLM Model')}</SettingLabel>
             {openrouterModels.length > 0 ? (
-              <select
-                className='select select-sm bg-base-100 text-base-content w-full'
-                value={openrouterModel}
-                onChange={(e) => setOpenrouterModel(e.target.value)}
-                disabled={!enabled}
-              >
-                {openrouterModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name ? `${m.name} (${m.id})` : m.id}
-                  </option>
-                ))}
-              </select>
+              <>
+                <input
+                  type='search'
+                  className='input input-sm w-full'
+                  value={openrouterModelSearch}
+                  onChange={(e) => setOpenrouterModelSearch(e.target.value)}
+                  placeholder={_('Search models')}
+                  aria-label={_('Search LLM models')}
+                  autoComplete='off'
+                  disabled={!enabled}
+                />
+                <select
+                  className='select select-sm bg-base-100 text-base-content w-full'
+                  value={openrouterModel}
+                  onChange={(e) => {
+                    setOpenrouterModel(e.target.value);
+                    setOpenrouterModelSearch('');
+                  }}
+                  disabled={!enabled}
+                >
+                  {visibleOpenrouterModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name ? `${m.name} (${m.id})` : m.id} ·{' '}
+                      {formatOpenRouterModelPrice(m.pricing)}
+                    </option>
+                  ))}
+                  {visibleOpenrouterModels.length === 0 && (
+                    <option value='' disabled>
+                      {_('No models match the search')}
+                    </option>
+                  )}
+                </select>
+              </>
             ) : (
               // Fallback: free-text input when /models isn't reachable yet,
               // so the user isn't locked out before refreshing succeeds.
@@ -719,7 +884,8 @@ const AIPanel: React.FC = () => {
                 <option value=''>{_('None (disable RAG)')}</option>
                 {openrouterModels.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name ? `${m.name} (${m.id})` : m.id}
+                    {m.name ? `${m.name} (${m.id})` : m.id} ·{' '}
+                    {formatOpenRouterModelPrice(m.pricing)}
                   </option>
                 ))}
               </select>
@@ -741,6 +907,177 @@ const AIPanel: React.FC = () => {
           </div>
         </BoxedList>
       )}
+
+      <BoxedList
+        title={_('Study cards (Advanced)')}
+        description={_(
+          'Customize study-card instructions and how much surrounding text is sent for context.',
+        )}
+      >
+        <div className='flex flex-col gap-2 pe-4 py-3'>
+          <div className='flex items-center justify-between gap-3'>
+            <SettingLabel as='label' htmlFor='study-card-cloze-prompt'>
+              {_('Study-card prompt')}
+            </SettingLabel>
+            <button
+              type='button'
+              className='btn btn-ghost btn-xs'
+              onClick={() => setStudyCardClozePrompt(DEFAULT_STUDY_CARD_CLOZE_PROMPT)}
+            >
+              {_('Reset')}
+            </button>
+          </div>
+          <textarea
+            id='study-card-cloze-prompt'
+            className='textarea textarea-sm min-h-40 w-full'
+            value={studyCardClozePrompt}
+            onChange={(event) => setStudyCardClozePrompt(event.target.value)}
+          />
+          <span className='text-base-content/60 text-xs'>
+            {_(
+              'These instructions are combined with the required learning-content schema and exercise guidelines.',
+            )}
+          </span>
+        </div>
+        <div className='grid grid-cols-1 gap-3 pe-4 py-3 sm:grid-cols-2'>
+          <label className='flex flex-col gap-2'>
+            <SettingLabel>{_('Context before sentence (characters)')}</SettingLabel>
+            <input
+              type='number'
+              className='input input-sm w-full'
+              min={0}
+              max={MAX_STUDY_CARD_CLOZE_CONTEXT_CHARS}
+              step={1}
+              value={studyCardClozeContextBeforeChars}
+              onChange={(event) =>
+                setStudyCardClozeContextBeforeChars(
+                  Math.max(
+                    0,
+                    Math.min(
+                      MAX_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+                      Number.parseInt(event.target.value, 10) || 0,
+                    ),
+                  ),
+                )
+              }
+            />
+          </label>
+          <label className='flex flex-col gap-2'>
+            <SettingLabel>{_('Context after sentence (characters)')}</SettingLabel>
+            <input
+              type='number'
+              className='input input-sm w-full'
+              min={0}
+              max={MAX_STUDY_CARD_CLOZE_CONTEXT_CHARS}
+              step={1}
+              value={studyCardClozeContextAfterChars}
+              onChange={(event) =>
+                setStudyCardClozeContextAfterChars(
+                  Math.max(
+                    0,
+                    Math.min(
+                      MAX_STUDY_CARD_CLOZE_CONTEXT_CHARS,
+                      Number.parseInt(event.target.value, 10) || 0,
+                    ),
+                  ),
+                )
+              }
+            />
+          </label>
+        </div>
+        <div className='flex flex-col gap-2 pe-4 py-3'>
+          <SettingLabel as='label' htmlFor='study-card-cloze-budget'>
+            {_('Approximate budget per generation (USD)')}
+          </SettingLabel>
+          <input
+            id='study-card-cloze-budget'
+            type='number'
+            className='input input-sm w-full sm:max-w-xs'
+            min={MIN_STUDY_CARD_CLOZE_BUDGET_USD}
+            max={MAX_STUDY_CARD_CLOZE_BUDGET_USD}
+            step={0.0001}
+            value={studyCardClozeBudgetUsd}
+            onChange={(event) =>
+              setStudyCardClozeBudgetUsd(
+                Math.max(
+                  MIN_STUDY_CARD_CLOZE_BUDGET_USD,
+                  Math.min(
+                    MAX_STUDY_CARD_CLOZE_BUDGET_USD,
+                    Number.parseFloat(event.target.value) || MIN_STUDY_CARD_CLOZE_BUDGET_USD,
+                  ),
+                ),
+              )
+            }
+          />
+          <span className='text-base-content/60 text-xs'>
+            {_(
+              'Used to calculate max_tokens from the selected model price. The default is $0.001; actual cost may vary slightly with tokenization.',
+            )}
+          </span>
+        </div>
+        <div className='grid grid-cols-1 gap-3 pe-4 py-3 sm:grid-cols-2'>
+          <label className='flex flex-col gap-2'>
+            <SettingLabel>{_('Only use these OpenRouter providers')}</SettingLabel>
+            <input
+              type='text'
+              className='input input-sm w-full'
+              value={studyCardProviderOnly}
+              onChange={(event) => setStudyCardProviderOnly(event.target.value)}
+              placeholder={_('Optional comma-separated provider names')}
+            />
+            <span className='text-base-content/60 text-xs'>
+              {_('Leave blank to allow any provider except those in the blacklist.')}
+            </span>
+          </label>
+          <label className='flex flex-col gap-2'>
+            <SettingLabel>{_('Blacklist OpenRouter providers')}</SettingLabel>
+            <input
+              type='text'
+              className='input input-sm w-full'
+              value={studyCardProviderIgnore}
+              onChange={(event) => setStudyCardProviderIgnore(event.target.value)}
+              placeholder={_('Optional comma-separated provider names')}
+            />
+            <span className='text-base-content/60 text-xs'>
+              {_('Provider names are the slugs shown by OpenRouter for the selected model.')}
+            </span>
+          </label>
+        </div>
+        <div className='flex flex-col gap-2 pe-4 py-3'>
+          <SettingLabel as='label' htmlFor='study-card-provider-sort'>
+            {_('Provider priority')}
+          </SettingLabel>
+          <select
+            id='study-card-provider-sort'
+            className='select select-sm bg-base-100 text-base-content w-full sm:max-w-xs'
+            value={studyCardProviderSort}
+            onChange={(event) =>
+              setStudyCardProviderSort(event.target.value as StudyCardProviderSort | '')
+            }
+          >
+            <option value=''>{_('OpenRouter default')}</option>
+            <option value='throughput'>{_('Prioritize speed')}</option>
+            <option value='price'>{_('Prioritize cost')}</option>
+          </select>
+          <span className='text-base-content/60 text-xs'>
+            {_('Applies to study-card generation requests for the selected model.')}
+          </span>
+        </div>
+        <SettingsSwitchRow
+          label={_('Auto-generate when opening card creation')}
+          description={_('Generate study content as soon as the study-card dialog opens.')}
+          checked={studyCardAutoGenerateOnOpen}
+          onChange={() => setStudyCardAutoGenerateOnOpen((current) => !current)}
+        />
+        <SettingsSwitchRow
+          label={_('Pre-generate when opening the dictionary')}
+          description={_(
+            'Prepare meanings and exercises while dictionary results load, then reuse them in card creation.',
+          )}
+          checked={studyCardAutoGenerateOnDictionaryOpen}
+          onChange={() => setStudyCardAutoGenerateOnDictionaryOpen((current) => !current)}
+        />
+      </BoxedList>
 
       <BoxedList
         title={_('Reedy Retrieval (Beta)')}

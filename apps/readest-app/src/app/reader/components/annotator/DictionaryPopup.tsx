@@ -4,6 +4,8 @@ import React from 'react';
 
 import Popup from '@/components/Popup';
 import { Position } from '@/utils/sel';
+import type { DictionaryEntry } from '@/services/dictionaries/types';
+import type { SelectionSnapshot } from '@/services/studyCards/types';
 import {
   useDictionaryResults,
   DictionaryResultsHeader,
@@ -24,6 +26,10 @@ interface DictionaryPopupProps {
    * deep-linking to the dictionaries sub-page.
    */
   onManage?: () => void;
+  selectionSnapshot?: SelectionSnapshot;
+  onCreateStudyCard?: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
+  autoGenerateStudyCard?: boolean;
+  onAutoGenerateStudyCard?: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
 }
 
 const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
@@ -35,8 +41,12 @@ const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
   popupHeight,
   onDismiss,
   onManage,
+  selectionSnapshot,
+  onCreateStudyCard,
+  autoGenerateStudyCard,
+  onAutoGenerateStudyCard,
 }) => {
-  const state = useDictionaryResults({ word, lang });
+  const state = useDictionaryResults({ word, lang, selectionSnapshot });
   return (
     <Popup
       width={popupWidth}
@@ -52,6 +62,7 @@ const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
         <DictionaryResultsHeader
           headerClassName='-mt-2'
           currentWord={state.currentWord}
+          setQuery={state.setQuery}
           canGoBack={state.canGoBack}
           goBack={state.goBack}
           onManage={onManage}
@@ -59,7 +70,12 @@ const DictionaryPopup: React.FC<DictionaryPopupProps> = ({
           speaking={state.isSpeaking}
         />
         <div className='min-h-0 flex-1'>
-          <DictionaryResultsBody {...state} />
+          <DictionaryResultsBody
+            {...state}
+            onCreateStudyCard={onCreateStudyCard}
+            autoGenerateStudyCard={autoGenerateStudyCard}
+            onAutoGenerateStudyCard={onAutoGenerateStudyCard}
+          />
         </div>
       </div>
     </Popup>

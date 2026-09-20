@@ -87,7 +87,7 @@ export class OpenRouterProvider implements AIProvider {
         signal: AbortSignal.timeout(AI_TIMEOUTS.HEALTH_CHECK),
       });
       if (!response.ok) {
-        throw new Error(`Health check failed: ${response.status}`);
+        throw await createOpenRouterResponseError(response);
       }
       aiLogger.provider.init('openrouter', 'healthCheck success');
       return true;
@@ -109,7 +109,94 @@ export interface OpenRouterModelInfo {
   name?: string;
   description?: string;
   context_length?: number;
+  pricing?: OpenRouterModelPricing;
+  supported_parameters?: string[];
 }
+
+export interface OpenRouterModelPricing {
+  prompt?: string;
+  completion?: string;
+  input?: string;
+  output?: string;
+}
+
+export const filterOpenRouterModels = (
+  models: OpenRouterModelInfo[],
+  query: string,
+  selectedId?: string,
+): OpenRouterModelInfo[] => {
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = normalizedQuery
+    ? models.filter((model) =>
+        `${model.name ?? ''} ${model.id}`.toLowerCase().includes(normalizedQuery),
+      )
+    : models;
+  if (selectedId && !filtered.some((model) => model.id === selectedId)) {
+    const selected = models.find((model) => model.id === selectedId);
+    if (selected) return [selected, ...filtered];
+  }
+  return filtered;
+};
+
+export const supportsOpenRouterStructuredOutputs = (
+  model: Pick<OpenRouterModelInfo, 'supported_parameters'>,
+): boolean => {
+  const supported = new Set(model.supported_parameters ?? []);
+  return supported.has('response_format') && supported.has('structured_outputs');
+};
+
+type OpenRouterErrorPayload = {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+    type?: unknown;
+  };
+  message?: unknown;
+};
+
+const asNonEmptyString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+/**
+ * Turn an OpenRouter error response into a user-actionable message without
+ * including the request body or the user's API key.
+ */
+export const createOpenRouterResponseError = async (response: Response): Promise<Error> => {
+  const payload = (await response.json().catch(() => null)) as OpenRouterErrorPayload | null;
+  const providerError = payload?.error;
+  const code = asNonEmptyString(providerError?.code);
+  const message =
+    asNonEmptyString(providerError?.message) ?? asNonEmptyString(payload?.message) ?? undefined;
+  const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+  const requestId =
+    response.headers?.get?.('x-request-id') ?? response.headers?.get?.('x-openrouter-request-id');
+  const details = [code, message, requestId ? `request id: ${requestId}` : undefined].filter(
+    (value): value is string => !!value,
+  );
+  return new Error(
+    `OpenRouter request failed (${status})${details.length ? `: ${details.join(' — ')}` : ''}`,
+  );
+};
+
+const formatPricePerMillion = (value: string): string => {
+  const price = Number(value) * 1_000_000;
+  if (!Number.isFinite(price)) return '?';
+  const fractionDigits = price >= 1 ? 2 : price >= 0.01 ? 4 : 6;
+  return price
+    .toFixed(fractionDigits)
+    .replace(/\.0+$/, '')
+    .replace(/(\.\d*?)0+$/, '$1');
+};
+
+export const formatOpenRouterModelPrice = (pricing: OpenRouterModelPricing | undefined): string => {
+  if (!pricing) return 'price unavailable';
+  const input = pricing.prompt ?? pricing.input;
+  const output = pricing.completion ?? pricing.output;
+  if (input === undefined && output === undefined) return 'price unavailable';
+  return `$${input === undefined ? '?' : formatPricePerMillion(input)}/M in · $${
+    output === undefined ? '?' : formatPricePerMillion(output)
+  }/M out`;
+};
 
 /**
  * Fetch the list of models exposed by an OpenAI-compatible endpoint.
@@ -133,8 +220,16 @@ export async function fetchOpenRouterModels(
     signal,
   });
   if (!response.ok) {
-    throw new Error(`Failed to fetch models: ${response.status}`);
+    throw await createOpenRouterResponseError(response);
   }
-  const json = (await response.json()) as { data?: OpenRouterModelInfo[] };
-  return Array.isArray(json.data) ? json.data : [];
+  const json = (await response.json().catch(() => null)) as { data?: unknown } | null;
+  if (!json || !Array.isArray(json.data)) {
+    throw new Error(
+      'OpenRouter returned an invalid /models response. Check the endpoint and token.',
+    );
+  }
+  return json.data.filter(
+    (model): model is OpenRouterModelInfo =>
+      !!model && typeof model === 'object' && typeof (model as { id?: unknown }).id === 'string',
+  );
 }

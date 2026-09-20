@@ -19,9 +19,14 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import type { DictionaryProvider, DictionaryLookupOutcome } from '@/services/dictionaries/types';
+import type {
+  DictionaryEntry,
+  DictionaryProvider,
+  DictionaryLookupOutcome,
+} from '@/services/dictionaries/types';
 import { BUILTIN_WEB_SEARCH_IDS } from '@/services/dictionaries/types';
 import type { ImportedDictionary } from '@/services/dictionaries/types';
+import type { SelectionSnapshot } from '@/services/studyCards/types';
 import type { BaseDir } from '@/types/system';
 import { createStarDictProvider } from '@/services/dictionaries/providers/starDictProvider';
 import { createDictProvider } from '@/services/dictionaries/providers/dictProvider';
@@ -311,6 +316,8 @@ const renderSheet = (
     lang: string;
     onDismiss: () => void;
     onManage: () => void;
+    selectionSnapshot: SelectionSnapshot;
+    onCreateStudyCard: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
   }> = {},
 ) =>
   render(
@@ -319,6 +326,8 @@ const renderSheet = (
       lang={props.lang}
       onDismiss={props.onDismiss ?? (() => {})}
       onManage={props.onManage}
+      selectionSnapshot={props.selectionSnapshot}
+      onCreateStudyCard={props.onCreateStudyCard}
     />,
   );
 
@@ -654,6 +663,22 @@ describe('DictionarySheet — empty state', () => {
     const gear = screen.getByLabelText('Manage Dictionaries');
     fireEvent.click(gear);
     expect(onManage).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers study-card creation from the dictionary surface', async () => {
+    const snapshot: SelectionSnapshot = {
+      id: 'selection-1',
+      selectedText: 'hello',
+      contextText: 'hello',
+      status: 'ready',
+      source: {},
+    };
+    const onCreateStudyCard = vi.fn();
+    renderSheet({ selectionSnapshot: snapshot, onCreateStudyCard });
+
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: 'Create study card' })));
+
+    expect(onCreateStudyCard).toHaveBeenCalledWith(snapshot, []);
   });
 });
 

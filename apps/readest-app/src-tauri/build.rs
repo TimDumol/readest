@@ -84,6 +84,132 @@ fn main() {
         ]),
     ))
     .expect("failed to run tauri-build");
+
+    if target_os == "android" {
+        ensure_android_launcher_background();
+        configure_local_anki_api();
+    }
+}
+
+fn ensure_android_launcher_background() {
+    let Some(project_dir) = env::var_os("TAURI_ANDROID_PROJECT_PATH").map(PathBuf::from) else {
+        return;
+    };
+
+    let values_dir = project_dir.join("app/src/main/res/values");
+    let color_file = values_dir.join("ic_launcher_background.xml");
+    if color_file.is_file() {
+        return;
+    }
+
+    fs::create_dir_all(&values_dir).expect("failed to create Android values resources");
+    fs::write(
+        color_file,
+        r##"<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="ic_launcher_background">#3DDC84</color>
+</resources>
+"##,
+    )
+    .expect("failed to create Android launcher background resource");
+}
+
+/// The AnkiDroid API's documented JitPack artifact is no longer published.
+/// Expose the checked-out API sources as a small local Android library instead
+/// so the native bridge remains buildable without a network artifact.
+fn configure_local_anki_api() {
+    let Some(project_dir) = env::var_os("TAURI_ANDROID_PROJECT_PATH").map(PathBuf::from) else {
+        return;
+    };
+
+    println!("cargo:rerun-if-env-changed=READEST_ANKI_ANDROID_DIR");
+    let default_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../../Anki-Android");
+    let anki_dir = env::var_os("READEST_ANKI_ANDROID_DIR")
+        .map(PathBuf::from)
+        .unwrap_or(default_dir);
+    let api_dir = anki_dir.join("api");
+    let api_source_dir = api_dir.join("src/main/java");
+    if !api_dir.join("build.gradle.kts").is_file() || !api_source_dir.is_dir() {
+        panic!(
+            "AnkiDroid API checkout not found at {}. Set READEST_ANKI_ANDROID_DIR to the Anki-Android checkout.",
+            anki_dir.display()
+        );
+    }
+    println!("cargo:rerun-if-changed={}", api_source_dir.display());
+
+    let api_project_dir = project_dir.join("anki-api");
+    fs::create_dir_all(&api_project_dir).expect("failed to create local AnkiDroid API project");
+    let api_path = gradle_path(&api_dir);
+    let api_project = format!(
+        r#"plugins {{
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
+}}
+
+android {{
+    namespace = "com.ichi2.anki.api"
+    compileSdk = 36
+
+    defaultConfig {{
+        minSdk = 21
+        buildConfigField("String", "READ_WRITE_PERMISSION", "\"com.ichi2.anki.permission.READ_WRITE_DATABASE\"")
+        buildConfigField("String", "AUTHORITY", "\"com.ichi2.anki.flashcards\"")
+    }}
+
+    buildFeatures {{
+        buildConfig = true
+    }}
+
+    kotlinOptions {{
+        jvmTarget = "1.8"
+    }}
+
+    sourceSets["main"].java.srcDir("{api_path}/src/main/java")
+    sourceSets["main"].res.srcDir("{api_path}/src/main/res")
+    sourceSets["main"].manifest.srcFile("{api_path}/src/main/AndroidManifest.xml")
+}}
+
+dependencies {{
+    implementation("androidx.annotation:annotation:1.7.1")
+}}
+"#
+    );
+    fs::write(api_project_dir.join("build.gradle.kts"), api_project)
+        .expect("failed to write local AnkiDroid API project");
+
+    let settings_path = project_dir.join("tauri.settings.gradle");
+    let mut settings =
+        fs::read_to_string(&settings_path).expect("failed to read generated Android settings");
+    if !settings.contains("include ':anki-api'") {
+        settings.push_str(&format!(
+            "include ':anki-api'\nproject(':anki-api').projectDir = new File({})\n",
+            gradle_string(&api_project_dir)
+        ));
+        fs::write(&settings_path, settings).expect("failed to add local AnkiDroid API project");
+    }
+
+    let app_gradle_path = project_dir.join("app/tauri.build.gradle.kts");
+    let mut app_gradle = fs::read_to_string(&app_gradle_path)
+        .expect("failed to read generated Android dependencies");
+    if !app_gradle.contains("implementation(project(\":anki-api\"))") {
+        let insert_at = app_gradle
+            .rfind("\n}")
+            .expect("generated Android dependencies have no closing brace");
+        app_gradle.insert_str(insert_at, "\n  implementation(project(\":anki-api\"))");
+        fs::write(app_gradle_path, app_gradle)
+            .expect("failed to add local AnkiDroid API dependency");
+    }
+}
+
+fn gradle_string(path: &Path) -> String {
+    format!("\"{}\"", gradle_path(path))
+}
+
+fn gradle_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
 }
 
 /// Bake the app version from `package.json` into the crate as `READEST_APP_VERSION`

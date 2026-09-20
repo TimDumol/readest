@@ -334,6 +334,103 @@ pub struct ShowLookupPopoverResponse {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AnkiDroidStatusResponse {
+    pub supported: bool,
+    pub installed: bool,
+    pub api_available: bool,
+    pub permission: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidPermissionResponse {
+    pub result: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidDeck {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidClozeTemplate {
+    pub name: String,
+    pub question: String,
+    pub answer: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidModel {
+    pub id: String,
+    pub name: String,
+    pub r#type: i32,
+    pub field_names: Vec<String>,
+    pub cloze_templates: Vec<AnkiDroidClozeTemplate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidDecksResponse {
+    pub decks: Vec<AnkiDroidDeck>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidModelsResponse {
+    pub models: Vec<AnkiDroidModel>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidStudyModelRequest {
+    pub name: String,
+    pub field_names: Vec<String>,
+    pub templates: Vec<AnkiDroidClozeTemplate>,
+    pub css: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidStudyModelResponse {
+    pub model_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidCheckDuplicateRequest {
+    pub model_id: String,
+    pub first_field: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidDuplicateResponse {
+    pub duplicate: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidAddNoteRequest {
+    pub model_id: String,
+    pub deck_id: String,
+    pub fields: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnkiDroidAddNoteResponse {
+    pub status: String,
+    pub note_id: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectDirectoryResponse {
     pub cancelled: Option<bool>,
     pub uri: Option<String>,

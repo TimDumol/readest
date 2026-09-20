@@ -21,10 +21,12 @@ import {
   substituteUrlTemplate,
 } from '@/services/dictionaries/webSearchTemplates';
 import type {
+  DictionaryEntry,
   DictionaryLookupOutcome,
   DictionaryProvider,
   WebSearchEntry,
 } from '@/services/dictionaries/types';
+import type { SelectionSnapshot } from '@/services/studyCards/types';
 import type { Insets } from '@/types/misc';
 
 const isTauri = isTauriAppPlatform();
@@ -54,10 +56,12 @@ interface CardState {
 export interface UseDictionaryResultsArgs {
   word: string;
   lang?: string;
+  selectionSnapshot?: SelectionSnapshot;
 }
 
 export interface DictionaryResultsState {
   currentWord: string;
+  setQuery?: (query: string) => void;
   canGoBack: boolean;
   goBack: () => void;
   visibleDefinitionProviders: DictionaryProvider[];
@@ -80,6 +84,9 @@ export interface DictionaryResultsState {
   isSpeaking: boolean;
   /** Pronounce the current word via Edge TTS (falling back to platform speech). */
   speakWord: () => void;
+  entries: DictionaryEntry[];
+  lookupComplete: boolean;
+  selectionSnapshot?: SelectionSnapshot;
 }
 
 /**
@@ -98,6 +105,7 @@ export interface DictionaryResultsState {
 export function useDictionaryResults({
   word,
   lang,
+  selectionSnapshot,
 }: UseDictionaryResultsArgs): DictionaryResultsState {
   const { appService } = useEnv();
   const { dictionaries, settings } = useCustomDictionaryStore();
@@ -167,6 +175,12 @@ export function useDictionaryResults({
 
   const goBack = useCallback(() => {
     setHistoryStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  }, []);
+
+  const setQuery = useCallback((query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    setHistoryStack((prev) => (prev[prev.length - 1] === trimmed ? prev : [...prev, trimmed]));
   }, []);
 
   // Pronounce the current headword (#4876). `isSpeaking` covers both the
@@ -415,9 +429,25 @@ export function useDictionaryResults({
 
   const canGoBack = historyStack.length > 1;
   const noProvidersAtAll = providers.length === 0;
+  const entries = useMemo(
+    () =>
+      definitionProviders.flatMap((provider) => {
+        const card = cards[provider.id];
+        if (!card || card.loadKey !== loadKey || !card.outcome?.ok) return [];
+        return card.outcome.entries ?? [];
+      }),
+    [cards, definitionProviders, loadKey],
+  );
+  const lookupComplete =
+    definitionProviders.length === 0 ||
+    definitionProviders.every((provider) => {
+      const card = cards[provider.id];
+      return card?.loadKey === loadKey && card.state !== 'loading';
+    });
 
   return {
     currentWord,
+    setQuery,
     canGoBack,
     goBack,
     visibleDefinitionProviders,
@@ -435,12 +465,16 @@ export function useDictionaryResults({
     closeZoomedImage,
     isSpeaking,
     speakWord,
+    entries,
+    lookupComplete,
+    selectionSnapshot,
   };
 }
 
 interface DictionaryResultsHeaderProps {
   headerClassName?: string;
   currentWord: string;
+  setQuery?: (query: string) => void;
   canGoBack: boolean;
   goBack: () => void;
   onManage?: () => void;
@@ -458,10 +492,19 @@ export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = (
   onManage,
   onSpeak,
   speaking,
+  setQuery,
 }) => {
   const _ = useTranslation();
+  const [query, setQueryInput] = React.useState(currentWord);
+  React.useEffect(() => setQueryInput(currentWord), [currentWord]);
   return (
-    <div className={clsx('flex h-8 w-full items-center justify-between px-2', headerClassName)}>
+    <form
+      className={clsx('flex h-9 w-full items-center justify-between gap-1 px-2', headerClassName)}
+      onSubmit={(event) => {
+        event.preventDefault();
+        setQuery?.(query);
+      }}
+    >
       <div className='flex h-8 w-8 items-center justify-center'>
         {canGoBack ? (
           <button
@@ -492,9 +535,16 @@ export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = (
             <MdVolumeUp size={18} />
           </button>
         ) : null}
-        <span data-testid='dict-title' className='line-clamp-1 min-w-0 font-bold'>
-          {currentWord}
-        </span>
+        <div data-testid='dict-title' className='min-w-0 flex-1'>
+          <span className='sr-only'>{query}</span>
+          <input
+            data-testid='dict-query'
+            aria-label={_('Dictionary query')}
+            value={query}
+            onChange={(event) => setQueryInput(event.target.value)}
+            className='input input-ghost input-sm w-full text-center font-bold focus:outline-none'
+          />
+        </div>
       </div>
       <div className='flex h-8 w-8 items-center justify-center'>
         {onManage ? (
@@ -509,11 +559,15 @@ export const DictionaryResultsHeader: React.FC<DictionaryResultsHeaderProps> = (
           </button>
         ) : null}
       </div>
-    </div>
+    </form>
   );
 };
 
-interface DictionaryResultsBodyProps extends DictionaryResultsState {}
+interface DictionaryResultsBodyProps extends DictionaryResultsState {
+  onCreateStudyCard?: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
+  autoGenerateStudyCard?: boolean;
+  onAutoGenerateStudyCard?: (snapshot: SelectionSnapshot, entries: DictionaryEntry[]) => void;
+}
 
 export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
   visibleDefinitionProviders,
@@ -529,9 +583,29 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
   fontScale,
   zoomedImageSrc,
   closeZoomedImage,
+  onCreateStudyCard,
+  autoGenerateStudyCard,
+  onAutoGenerateStudyCard,
+  lookupComplete,
+  selectionSnapshot,
+  entries,
 }) => {
   const _ = useTranslation();
   const safeAreaInsets = useThemeStore((s) => s.safeAreaInsets);
+  const autoGenerationSnapshotRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (
+      !autoGenerateStudyCard ||
+      !selectionSnapshot ||
+      !lookupComplete ||
+      autoGenerationSnapshotRef.current === selectionSnapshot.id
+    ) {
+      return;
+    }
+    autoGenerationSnapshotRef.current = selectionSnapshot.id;
+    onAutoGenerateStudyCard?.(selectionSnapshot, entries);
+  }, [autoGenerateStudyCard, entries, lookupComplete, onAutoGenerateStudyCard, selectionSnapshot]);
 
   // `first:pt-2` keeps the leading section's tighter top padding whichever of
   // the two comes first.
@@ -668,6 +742,17 @@ export const DictionaryResultsBody: React.FC<DictionaryResultsBodyProps> = ({
             onClose={closeZoomedImage}
           />
         </ModalPortal>
+      )}
+      {selectionSnapshot && onCreateStudyCard && (
+        <div className='border-base-content/10 border-t px-4 py-3'>
+          <button
+            type='button'
+            className='btn btn-contrast w-full'
+            onClick={() => onCreateStudyCard(selectionSnapshot, entries)}
+          >
+            {_('Create study card')}
+          </button>
+        </div>
       )}
     </div>
   );

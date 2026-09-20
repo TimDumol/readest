@@ -140,6 +140,35 @@ class ShowLookupPopoverArgs {
 }
 
 @InvokeArg
+class AnkiDroidCheckDuplicateArgs {
+    var modelId: String? = null
+    var firstField: String? = null
+}
+
+@InvokeArg
+class AnkiDroidStudyTemplateArgs {
+    var name: String = ""
+    var question: String = ""
+    var answer: String = ""
+}
+
+@InvokeArg
+class AnkiDroidStudyModelArgs {
+    var name: String = ""
+    var fieldNames: List<String> = emptyList()
+    var templates: List<AnkiDroidStudyTemplateArgs> = emptyList()
+    var css: String = ""
+}
+
+@InvokeArg
+class AnkiDroidAddNoteArgs {
+    var modelId: String? = null
+    var deckId: String? = null
+    var fields: List<String> = emptyList()
+    var tags: List<String> = emptyList()
+}
+
+@InvokeArg
 class FetchProductsRequestArgs {
     val productIds: List<String>? = null
 }
@@ -218,6 +247,7 @@ interface KeyDownInterceptor {
 )
 class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     private val implementation = NativeBridge()
+    private val ankiDroidAdapter by lazy { AnkiDroidAdapter(activity) }
     private var webViewRef: WebView? = null
     private val billingManager by lazy {
         BillingManager(activity)
@@ -1321,6 +1351,77 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             invoke.resolve(ret)
         } catch (e: Exception) {
             invoke.reject("Failed to open URL: ${e.message}")
+        }
+    }
+
+    @Command
+    fun anki_get_status(invoke: Invoke) {
+        invoke.resolve(ankiDroidAdapter.status())
+    }
+
+    @Command
+    fun anki_request_permission(invoke: Invoke) {
+        invoke.resolve(ankiDroidAdapter.requestPermission())
+    }
+
+    @Command
+    fun anki_list_decks(invoke: Invoke) {
+        pluginScope.launch {
+            try {
+                invoke.resolve(ankiDroidAdapter.listDecks())
+            } catch (error: Exception) {
+                if (isActive) invoke.reject(error.message ?: "Unable to list AnkiDroid decks")
+            }
+        }
+    }
+
+    @Command
+    fun anki_list_models(invoke: Invoke) {
+        pluginScope.launch {
+            try {
+                invoke.resolve(ankiDroidAdapter.listModels())
+            } catch (error: Exception) {
+                if (isActive) invoke.reject(error.message ?: "Unable to list AnkiDroid models")
+            }
+        }
+    }
+
+    @Command
+    fun anki_ensure_study_model(invoke: Invoke) {
+        val args = invoke.parseArgs(AnkiDroidStudyModelArgs::class.java)
+        pluginScope.launch {
+            try {
+                invoke.resolve(ankiDroidAdapter.ensureStudyModel(
+                    args.name, args.fieldNames, args.templates.map { it.name },
+                    args.templates.map { it.question }, args.templates.map { it.answer }, args.css,
+                ))
+            } catch (error: Exception) {
+                if (isActive) invoke.reject(error.message ?: "Unable to create the Readest note type")
+            }
+        }
+    }
+
+    @Command
+    fun anki_check_duplicate(invoke: Invoke) {
+        val args = invoke.parseArgs(AnkiDroidCheckDuplicateArgs::class.java)
+        pluginScope.launch {
+            try {
+                invoke.resolve(ankiDroidAdapter.checkDuplicate(args.modelId ?: "", args.firstField ?: ""))
+            } catch (error: Exception) {
+                if (isActive) invoke.reject(error.message ?: "Unable to check AnkiDroid duplicates")
+            }
+        }
+    }
+
+    @Command
+    fun anki_add_note(invoke: Invoke) {
+        val args = invoke.parseArgs(AnkiDroidAddNoteArgs::class.java)
+        pluginScope.launch {
+            try {
+                invoke.resolve(ankiDroidAdapter.addNote(args.modelId ?: "", args.deckId ?: "", args.fields, args.tags))
+            } catch (error: Exception) {
+                if (isActive) invoke.reject(error.message ?: "Unable to add the AnkiDroid note")
+            }
         }
     }
 

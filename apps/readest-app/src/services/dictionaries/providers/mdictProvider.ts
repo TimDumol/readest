@@ -20,6 +20,7 @@ import { eventDispatcher } from '@/utils/event';
 import { SILENCE_DATA } from '@/services/tts/TTSData';
 import { stubTranslation as _ } from '@/utils/misc';
 import { getDictStyles } from '@/utils/style';
+import { entryHtmlToText } from '../entryText';
 import type { DictionaryProvider, ImportedDictionary } from '../types';
 import type { DictionaryFileOpener } from './starDictProvider';
 
@@ -667,8 +668,8 @@ export const createMdictProvider = ({
         // Follow MDict `@@@LINK=<target>` content-level redirects: the
         // looked-up entry's "definition" is sometimes just the literal
         // string `@@@LINK=question` pointing at the canonical headword.
-        // Capped at 5 hops so a malformed cycle can't deadlock the
-        // lookup; whatever we have at the limit is rendered as-is.
+        // Capped at 5 hops so a malformed cycle can't deadlock the lookup;
+        // exhausted or cyclic redirects are treated as empty results.
         //
         // Detection is intentionally loose. Real-world variants we have seen:
         //   `@@@LINK=question`              plain
@@ -693,17 +694,32 @@ export const createMdictProvider = ({
 
         let result = await mdx.lookup(word);
         if (ctx.signal.aborted) return { ok: false, reason: 'error', message: 'aborted' };
+        const visited = new Set<string>();
+        let redirectExhausted = false;
         for (let hop = 0; hop < 5; hop++) {
           const target = extractRedirect(result.definition);
           if (!target) break;
+          if (visited.has(target) || target === result.keyText) {
+            redirectExhausted = true;
+            break;
+          }
+          visited.add(target);
           result = await mdx.lookup(target);
           if (ctx.signal.aborted) return { ok: false, reason: 'error', message: 'aborted' };
+          if (hop === 4 && extractRedirect(result.definition)) redirectExhausted = true;
         }
-        if (!result.definition) return { ok: false, reason: 'empty' };
+        if (!result.definition || redirectExhausted || extractRedirect(result.definition)) {
+          // A redirect loop is not a definition. Never export its control
+          // marker as portable card content.
+          return { ok: false, reason: 'empty' };
+        }
+        const resolvedHeadword = result.keyText || word;
+        const sourceLabel = label ?? dict.name;
+        const definitionText = entryHtmlToText(result.definition);
 
         // Headword stays in light DOM so the app's Tailwind classes apply.
         const headword = document.createElement('h1');
-        headword.textContent = result.keyText || word;
+        headword.textContent = resolvedHeadword;
         headword.className = 'text-lg font-bold';
         ctx.container.appendChild(headword);
 
@@ -803,7 +819,23 @@ export const createMdictProvider = ({
           })();
         }
 
-        return { ok: true, headword: result.keyText, sourceLabel: dict.name };
+        return {
+          ok: true,
+          headword: resolvedHeadword,
+          sourceLabel,
+          entries: definitionText
+            ? [
+                {
+                  id: `${dict.id}:${word}:${resolvedHeadword}`,
+                  providerId: dict.id,
+                  sourceLabel,
+                  lookupQuery: word,
+                  headword: resolvedHeadword,
+                  definitionText,
+                },
+              ]
+            : undefined,
+        };
       } catch (err) {
         return {
           ok: false,

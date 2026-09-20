@@ -44,9 +44,17 @@ android {
 }
 
 dependencies {
+    // The AnkiDroid API is wired into the generated Android project from the
+    // local Anki-Android checkout by src-tauri/build.rs. Keep the JitPack
+    // coordinate as a fallback for standalone plugin builds.
+    if (rootProject.findProject(":anki-api") != null) {
+        implementation(project(":anki-api"))
+    } else {
+        implementation("com.github.ankidroid:Anki-Android:api-v1.1.0")
+    }
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     "googleplayImplementation"("com.android.billingclient:billing:9.1.0")
     "googleplayImplementation"("com.google.android.gms:play-services-base:18.5.0")
-    "googleplayImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.browser:browser:1.8.0")

@@ -48,8 +48,23 @@ export interface DictionaryLookupContext {
   autoPlayPronunciation?: boolean;
 }
 
+/** A plain-text representation of one structured dictionary result. */
+export type DictionaryEntry = {
+  id: string;
+  providerId: string;
+  sourceLabel: string;
+  lookupQuery: string;
+  headword: string;
+  definitionText: string;
+};
+
 export type DictionaryLookupOutcome =
-  | { ok: true; headword?: string; sourceLabel?: string }
+  | {
+      ok: true;
+      headword?: string;
+      sourceLabel?: string;
+      entries?: DictionaryEntry[];
+    }
   | { ok: false; reason: 'empty' | 'unsupported' | 'error'; message?: string };
 
 export interface DictionaryProvider {

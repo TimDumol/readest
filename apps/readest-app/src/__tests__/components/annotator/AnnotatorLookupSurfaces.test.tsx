@@ -18,6 +18,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { eventDispatcher } from '@/utils/event';
 import type { TextSelection } from '@/utils/sel';
 
+type SnapshotLike = { selectedText: string };
+type DictionarySurfaceProps = {
+  onDismiss: () => void;
+  selectionSnapshot?: SnapshotLike;
+  onCreateStudyCard?: (snapshot: SnapshotLike, entries: []) => void;
+};
+
 const h = vi.hoisted(() => ({
   actions: null as null | Record<string, () => boolean>,
   config: { booknotes: [] as unknown[], viewSettings: {} },
@@ -237,17 +244,36 @@ vi.mock('@/app/reader/components/annotator/AnnotationPopup', () => ({
 // The dismiss button stands in for the popup's close / backdrop tap, so a test
 // can drive the route back out of the lookup.
 vi.mock('@/app/reader/components/annotator/DictionaryPopup', () => ({
-  default: ({ onDismiss }: { onDismiss: () => void }) => (
+  default: ({ onDismiss, selectionSnapshot, onCreateStudyCard }: DictionarySurfaceProps) => (
     <div data-testid='dictionary-surface'>
       <button type='button' data-testid='dictionary-dismiss' onClick={onDismiss} />
+      {selectionSnapshot && onCreateStudyCard && (
+        <button
+          type='button'
+          data-testid='dictionary-create-study-card'
+          onClick={() => onCreateStudyCard(selectionSnapshot, [])}
+        />
+      )}
     </div>
   ),
 }));
 vi.mock('@/app/reader/components/annotator/DictionarySheet', () => ({
-  default: ({ onDismiss }: { onDismiss: () => void }) => (
+  default: ({ onDismiss, selectionSnapshot, onCreateStudyCard }: DictionarySurfaceProps) => (
     <div data-testid='dictionary-surface'>
       <button type='button' data-testid='dictionary-dismiss' onClick={onDismiss} />
+      {selectionSnapshot && onCreateStudyCard && (
+        <button
+          type='button'
+          data-testid='dictionary-create-study-card'
+          onClick={() => onCreateStudyCard(selectionSnapshot, [])}
+        />
+      )}
     </div>
+  ),
+}));
+vi.mock('@/app/reader/components/annotator/studyCards/StudyCardDialog', () => ({
+  default: ({ snapshot }: { snapshot: SnapshotLike }) => (
+    <div data-testid='study-card-surface'>{snapshot.selectedText}</div>
   ),
 }));
 vi.mock('@/app/reader/components/annotator/TranslatorPopup', () => ({
@@ -322,6 +348,25 @@ describe('a lookup surface survives the selection it is anchored to being republ
 
     expect(screen.queryByTestId(testId)).toBeTruthy();
     expect(screen.queryByTestId('annotation-toolbar')).toBeNull();
+  });
+
+  test('opens the dictionary before the study-card review surface', async () => {
+    render(<Annotator bookKey='book-1' contentInsets={{ top: 0, right: 0, bottom: 0, left: 0 }} />);
+    await selectText();
+
+    act(() => {
+      h.actions?.['onDictionarySelection']?.();
+    });
+
+    expect(screen.getByTestId('dictionary-surface')).toBeTruthy();
+    expect(screen.queryByTestId('study-card-surface')).toBeNull();
+
+    await act(async () => {
+      screen.getByTestId('dictionary-create-study-card').click();
+    });
+
+    expect(screen.queryByTestId('dictionary-surface')).toBeNull();
+    expect(screen.getByTestId('study-card-surface').textContent).toBe('selected text');
   });
 });
 
