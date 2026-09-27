@@ -76,6 +76,8 @@ describe('enriched study notes', () => {
     expect(STUDY_NOTE_TEMPLATES[0]?.question).not.toContain('What does the highlighted text mean');
     expect(STUDY_NOTE_TEMPLATES[1]?.question).toContain('Production');
     expect(STUDY_NOTE_TEMPLATES[1]?.question).toContain('readest-prompt');
+    expect(STUDY_NOTE_TEMPLATES[1]?.question).toContain('{{Meaning}}');
+    expect(STUDY_NOTE_TEMPLATES[1]?.question).toContain('readest-production-gloss');
   });
 
   it('rejects empty selection and unavailable exercises before export', () => {
@@ -120,6 +122,9 @@ describe('enriched study notes', () => {
     expect(() => parseLearningContent({})).toThrow();
     expect(() => parseLearningContent({ lemma: 'comprar', exercises: [] })).toThrow();
     const content = learningFixture();
+    content.exercises.vocabulary.prompt = 'Fill in the word that means buy.';
+    expect(() => parseLearningContent(content)).toThrow('single cloze sentence');
+    content.exercises.vocabulary.prompt = 'Ella [...] un libro.';
     content.exercises.vocabulary.answer = '';
     expect(() => parseLearningContent(content)).toThrow();
     content.exercises.vocabulary.answer = 'compró';

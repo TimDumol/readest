@@ -1,10 +1,11 @@
 import { getAIFetch } from '@/services/ai/utils/httpFetch';
 import { LEARNING_INSTRUCTIONS, LEARNING_SCHEMA, parseLearningContent } from './learningContent';
-import type { StudyCardLearning } from './types';
+import type { StudyCardLearning, TextSpan } from './types';
 import {
   DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
   DEFAULT_STUDY_CARD_CLOZE_PROMPT,
   DEFAULT_STUDY_CARD_CLOZE_MAX_TOKENS,
+  DEFAULT_STUDY_CARD_TARGET_LANGUAGE,
   getStudyCardPrompt,
   MAX_STUDY_CARD_CLOZE_CONTEXT_CHARS,
   MAX_STUDY_CARD_CLOZE_MAX_TOKENS,
@@ -34,6 +35,7 @@ export type GenerateStudyCardClozeOptions = {
   baseUrl?: string;
   contextText: string;
   selectedText: string;
+  selectedSpan?: TextSpan;
   definitions: StudyCardAIDefinition[];
   sourceText?: string;
   targetLanguage?: string;
@@ -110,8 +112,6 @@ type ChatCompletionResponse = {
 };
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
-const CLOZE_MARKER_RX = /\{\{c\d+::/gi;
-const CLOZE_RX = /^(.*?)\{\{c1::(.*?)(?:::((?:.|\n)*?))?\}\}(.*)$/s;
 
 const STRUCTURED_CLOZE_RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -121,21 +121,17 @@ const STRUCTURED_CLOZE_RESPONSE_FORMAT = {
     schema: {
       type: 'object',
       properties: {
-        cloze_text: {
+        cloze_hint: {
           type: 'string',
-          description: 'The original context with exactly one Anki {{c1::...}} cloze marker.',
+          description: 'Empty or a short hint without Anki markers.',
         },
         gloss: {
           type: 'string',
-          description: 'A concise dictionary-style meaning of the selected text.',
+          description: 'Concise contextual meaning in the target language.',
         },
         translation: {
           type: 'string',
-          description: 'A natural translation of the complete context into the target language.',
-        },
-        source_text: {
-          type: 'string',
-          description: 'The source-text block exactly as provided, without cloze markup.',
+          description: 'Complete context translated into the target language.',
         },
         tags: {
           type: 'array',
@@ -143,7 +139,7 @@ const STRUCTURED_CLOZE_RESPONSE_FORMAT = {
           maxItems: 3,
         },
       },
-      required: ['cloze_text', 'gloss', 'translation', 'source_text', 'tags'],
+      required: ['cloze_hint', 'gloss', 'translation', 'tags'],
       additionalProperties: false,
     },
   },
@@ -155,7 +151,6 @@ export const buildStudyCardPrompt = (
     | 'contextText'
     | 'selectedText'
     | 'definitions'
-    | 'sourceText'
     | 'targetLanguage'
     | 'additionalContextBefore'
     | 'additionalContextAfter'
@@ -183,11 +178,8 @@ export const buildStudyCardPrompt = (
     '<selected-text>',
     options.selectedText,
     '</selected-text>',
-    '<source-text>',
-    options.sourceText || options.contextText,
-    '</source-text>',
     '<translation-target-language>',
-    options.targetLanguage || 'EN',
+    options.targetLanguage || DEFAULT_STUDY_CARD_TARGET_LANGUAGE,
     '</translation-target-language>',
     '<dictionary-definitions>',
     definitions,
@@ -269,27 +261,28 @@ export const buildStudyCardAdditionalContext = (options: {
   };
 };
 
-const validateModelOutput = (value: string, contextText: string, selectedText: string): string => {
-  const output = value
-    .trim()
-    .replace(/^```(?:text)?\s*|\s*```$/g, '')
-    .trim();
-  if ((output.match(CLOZE_MARKER_RX) ?? []).length !== 1) {
-    throw new Error('The model must return exactly one cloze. Try again.');
+const buildClozeText = (
+  contextText: string,
+  selectedText: string,
+  selectedSpan: TextSpan | undefined,
+  hint: string,
+): string => {
+  const start = selectedSpan?.start ?? contextText.indexOf(selectedText);
+  const end = selectedSpan?.end ?? (start >= 0 ? start + selectedText.length : -1);
+  if (
+    start < 0 ||
+    end < start ||
+    end > contextText.length ||
+    contextText.slice(start, end) !== selectedText
+  ) {
+    throw new Error('The selected text no longer matches the captured reading context.');
   }
-  const match = output.match(CLOZE_RX);
-  if (!match) throw new Error('The model returned an invalid cloze. Try again.');
-  const [, prefix, answer, hint, suffix] = match;
-  if ([prefix, hint, suffix].some((part) => part?.includes('{{') || part?.includes('}}'))) {
-    throw new Error('The model returned more than one cloze. Try again.');
-  }
-  if (answer !== selectedText) {
-    throw new Error('The model changed the selected text. Try again.');
-  }
-  if ((prefix ?? '') + (answer ?? '') + (suffix ?? '') !== contextText) {
-    throw new Error('The model changed the reading context. Try again.');
-  }
-  return output;
+  const normalizedHint = hint.trim();
+  const clozeHint =
+    normalizedHint.includes('{{') || normalizedHint.includes('}}') ? '' : normalizedHint;
+  return `${contextText.slice(0, start)}{{c1::${selectedText}${
+    clozeHint ? `::${clozeHint}` : ''
+  }}}${contextText.slice(end)}`;
 };
 
 const extractTextContent = (content: unknown): string => {
@@ -348,16 +341,18 @@ const parseChatCompletionResponse = async (response: Response): Promise<ChatComp
 
 type StructuredStudyCard = {
   learning?: unknown;
-  cloze_text?: unknown;
+  cloze_hint?: unknown;
   gloss?: unknown;
   translation?: unknown;
-  source_text?: unknown;
   tags?: unknown;
 };
 
 const parseStructuredStudyCard = (
   content: string,
-  expectedSourceText: string,
+  contextText: string,
+  selectedText: string,
+  selectedSpan: TextSpan | undefined,
+  sourceText: string,
   enriched = false,
 ): Omit<StudyCardAIGeneration, 'usage' | 'generationDurationMs'> => {
   let parsed: unknown;
@@ -375,32 +370,26 @@ const parseStructuredStudyCard = (
   }
   const card = parsed as StructuredStudyCard;
   if (
-    typeof card.cloze_text !== 'string' ||
+    typeof card.cloze_hint !== 'string' ||
     typeof card.gloss !== 'string' ||
     typeof card.translation !== 'string' ||
-    typeof card.source_text !== 'string' ||
     !Array.isArray(card.tags) ||
     !card.tags.every((tag) => typeof tag === 'string')
   ) {
     const keys = Object.keys(card).join(', ') || 'none';
     throw new Error(
-      `OpenRouter returned incomplete study-card JSON (keys: ${keys}). Expected cloze_text, gloss, translation, source_text, and tags.`,
+      `OpenRouter returned incomplete study-card JSON (keys: ${keys}). Expected cloze_hint, gloss, translation, and tags.`,
     );
   }
-  if (!card.cloze_text.trim() || !card.gloss.trim() || !card.translation.trim()) {
-    throw new Error('OpenRouter returned an empty cloze, gloss, or translation field. Try again.');
-  }
-  if (card.source_text !== expectedSourceText) {
-    throw new Error(
-      'OpenRouter changed the source_text field. The original context was preserved.',
-    );
+  if (!card.gloss.trim() || !card.translation.trim()) {
+    throw new Error('OpenRouter returned an empty gloss or translation field. Try again.');
   }
   return {
     ...(enriched ? { learning: parseLearningContent(card.learning) } : {}),
-    clozeText: card.cloze_text,
+    clozeText: buildClozeText(contextText, selectedText, selectedSpan, card.cloze_hint),
     gloss: card.gloss.trim(),
     translation: card.translation.trim(),
-    sourceText: card.source_text,
+    sourceText,
     tags: card.tags
       .map((tag) => tag.trim())
       .filter(Boolean)
@@ -452,6 +441,7 @@ export const generateStudyCardCloze = async ({
   baseUrl = DEFAULT_BASE_URL,
   contextText,
   selectedText,
+  selectedSpan,
   definitions,
   sourceText,
   targetLanguage,
@@ -477,7 +467,6 @@ export const generateStudyCardCloze = async ({
     contextText,
     selectedText,
     definitions,
-    sourceText,
     targetLanguage,
     additionalContextBefore,
     additionalContextAfter,
@@ -553,7 +542,14 @@ export const generateStudyCardCloze = async ({
   const data = await parseChatCompletionResponse(response);
   const content = extractTextContent(data.choices?.[0]?.message?.content);
   if (!content.trim()) throw new Error(describeNoTextResponse(data));
-  const generated = parseStructuredStudyCard(content, sourceText || contextText, enriched);
+  const generated = parseStructuredStudyCard(
+    content,
+    contextText,
+    selectedText,
+    selectedSpan,
+    sourceText || contextText,
+    enriched,
+  );
   if (
     generated.learning &&
     (!contextText.includes(generated.learning.learningTarget) ||
@@ -565,7 +561,6 @@ export const generateStudyCardCloze = async ({
   }
   return {
     ...generated,
-    clozeText: validateModelOutput(generated.clozeText, contextText, selectedText),
     usage: normalizeUsage(data.usage, pricing),
     generationDurationMs: Math.max(
       0,
@@ -583,6 +578,7 @@ const studyCardGenerationCacheKey = ({
   baseUrl,
   contextText,
   selectedText,
+  selectedSpan,
   definitions,
   sourceText,
   targetLanguage,
@@ -600,6 +596,7 @@ const studyCardGenerationCacheKey = ({
     baseUrl,
     contextText,
     selectedText,
+    selectedSpan,
     definitions,
     sourceText,
     targetLanguage,

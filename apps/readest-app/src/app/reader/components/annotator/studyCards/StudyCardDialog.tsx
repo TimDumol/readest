@@ -13,6 +13,7 @@ import {
   DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD,
   DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
   DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+  DEFAULT_STUDY_CARD_TARGET_LANGUAGE,
 } from '@/services/ai/constants';
 import {
   fetchOpenRouterModels,
@@ -193,7 +194,9 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
     () => filterOpenRouterModels(openrouterModels, openrouterModelSearch, openrouterModel),
     [openrouterModel, openrouterModelSearch, openrouterModels],
   );
-  const targetLanguage = settings?.globalViewSettings?.translateTargetLang || 'EN';
+  // Study-card translations should stay in English independently of the
+  // reader's global translation target (which may follow the UI locale).
+  const targetLanguage = DEFAULT_STUDY_CARD_TARGET_LANGUAGE;
   const additionalContext = useMemo(
     () =>
       contextMode === 'sentence'
@@ -219,7 +222,6 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
       buildStudyCardPrompt({
         contextText: draft.contextText,
         selectedText: draft.selectedText,
-        sourceText: draft.sourceText,
         targetLanguage,
         additionalContextBefore: additionalContext.before,
         additionalContextAfter: additionalContext.after,
@@ -237,7 +239,6 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
       draft.contextText,
       draft.definitions,
       draft.selectedText,
-      draft.sourceText,
       targetLanguage,
     ],
   );
@@ -377,6 +378,7 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
         baseUrl: aiSettings.openrouterBaseUrl,
         contextText: draft.contextText,
         selectedText: draft.selectedText,
+        selectedSpan: draft.selectedSpan,
         prompt: aiSettings.studyCardClozePrompt || DEFAULT_STUDY_CARD_CLOZE_PROMPT,
         additionalContextBefore: additionalContext.before,
         additionalContextAfter: additionalContext.after,

@@ -24,6 +24,7 @@ usage() {
     '  READEST_ANDROID_TARGET    Tauri target (default: aarch64)' \
     '  READEST_ANDROID_PACKAGE   Android application ID' \
     '  READEST_ANDROID_DEVICE    ADB serial when several targets are connected' \
+    '  READEST_ANDROID_DEV_VERSION_SUFFIX  Debug version suffix (default: -dev<UTC build time>)' \
     '  READEST_ADB               ADB executable path' \
     '  ANDROID_SERIAL            Standard ADB serial override'
 }

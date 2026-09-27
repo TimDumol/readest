@@ -71,6 +71,7 @@ import {
   DEFAULT_STUDY_CARD_CLOZE_BUDGET_USD,
   DEFAULT_STUDY_CARD_CLOZE_CONTEXT_CHARS,
   DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+  DEFAULT_STUDY_CARD_TARGET_LANGUAGE,
 } from '@/services/ai/constants';
 import {
   fetchOpenRouterModels,
@@ -1747,6 +1748,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
         baseUrl: aiSettings.openrouterBaseUrl,
         contextText: draft.contextText,
         selectedText: draft.selectedText,
+        selectedSpan: draft.selectedSpan,
         prompt: aiSettings.studyCardClozePrompt || DEFAULT_STUDY_CARD_CLOZE_PROMPT,
         additionalContextBefore: surroundingContext.before,
         additionalContextAfter: surroundingContext.after,
@@ -1755,7 +1757,7 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets }> = ({
         pricing,
         provider: aiSettings.studyCardClozeProvider,
         sourceText: draft.sourceText,
-        targetLanguage: settings.globalViewSettings.translateTargetLang || 'EN',
+        targetLanguage: DEFAULT_STUDY_CARD_TARGET_LANGUAGE,
         definitions: definitions.map((definition) => ({
           sourceLabel: definition.sourceLabel,
           headword: definition.headword,

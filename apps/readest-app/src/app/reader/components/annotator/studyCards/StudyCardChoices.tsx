@@ -88,6 +88,11 @@ export default function StudyCardChoices({ draft, disabled, onChange }: Props) {
               <details className='mt-2 text-sm'>
                 <summary>{_('Preview and edit')}</summary>
                 <p className='whitespace-pre-wrap'>{exercise.prompt}</p>
+                {draft.gloss && (
+                  <p className='text-sm italic opacity-70'>
+                    {_('Gloss')}: {draft.gloss}
+                  </p>
+                )}
                 {exercise.hint && (
                   <details>
                     <summary>{_('Hint')}</summary>

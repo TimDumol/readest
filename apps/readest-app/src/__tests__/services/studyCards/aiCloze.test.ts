@@ -2,12 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockFetch = vi.fn();
 
-const structuredCard = (clozeText: string, overrides: Record<string, unknown> = {}) =>
+const structuredCard = (overrides: Record<string, unknown> = {}) =>
   JSON.stringify({
-    cloze_text: clozeText,
+    cloze_hint: '',
     gloss: 'to buy',
     translation: 'Ella bought a book.',
-    source_text: 'Ella compró un libro.',
     tags: ['verb'],
     ...overrides,
   });
@@ -26,6 +25,7 @@ import {
 } from '@/services/studyCards/aiCloze';
 import {
   DEFAULT_STUDY_CARD_CLOZE_PROMPT,
+  DEFAULT_STUDY_CARD_TARGET_LANGUAGE,
   LEGACY_STUDY_CARD_CLOZE_PROMPT,
 } from '@/services/ai/constants';
 import { supportsOpenRouterStructuredOutputs } from '@/services/ai/providers/OpenRouterProvider';
@@ -41,7 +41,7 @@ describe('study card AI cloze generation', () => {
         choices: [
           {
             message: {
-              content: structuredCard('Ella {{c1::compró}} un libro.', {
+              content: structuredCard({
                 learning: learningFixture(),
               }),
             },
@@ -74,12 +74,11 @@ describe('study card AI cloze generation', () => {
       request.response_format.json_schema.schema.properties.learning.properties.exercises.properties
         .vocabulary.properties,
     ).not.toHaveProperty('recommended');
-    expect(request.messages[0].content).toContain(
-      'Do not force an artificial or redundant exercise',
-    );
-    expect(request.messages[0].content).toContain(
-      'The prompt/front must not contain the selected word',
-    );
+    expect(request.messages[0].content).toContain('mark the vocabulary exercise applicable');
+    expect(request.messages[0].content).toContain('The prompt must not');
+    expect(request.messages[0].content).toContain('exactly one [...] blank');
+    expect(request.messages[0].content).toContain('do not add instructions');
+    expect(request.messages[0].content).not.toContain('Include a short task instruction');
     expect(request.messages[0].content).not.toContain('Recommendations');
     expect(request.messages[0].content).not.toContain('phrase/preposition');
   });
@@ -100,7 +99,7 @@ describe('study card AI cloze generation', () => {
           choices: [
             {
               message: {
-                content: structuredCard('Ella {{c1::compró}} un libro.', { learning }),
+                content: structuredCard({ learning }),
               },
             },
           ],
@@ -116,7 +115,7 @@ describe('study card AI cloze generation', () => {
       json: async () => ({
         choices: [
           {
-            message: { content: structuredCard('Ella {{c1::compró}} un libro.') },
+            message: { content: structuredCard() },
           },
         ],
         usage: {
@@ -173,11 +172,11 @@ describe('study card AI cloze generation', () => {
       response_format: { type: string; json_schema: { name: string; strict: boolean } };
     };
     expect(body.model).toBe('openai/gpt-4o-mini');
-    expect(body.messages[0]!.content).toContain('same tense, plurality');
-    expect(body.messages[0]!.content).toContain('gender, and part of speech');
-    expect(body.messages[0]!.content).toContain('Do not stop');
+    expect(body.messages[0]!.content).toContain('Preserve the selected text exactly as supplied');
+    expect(body.messages[0]!.content).not.toContain('Do not stop');
     expect(body.messages[1]!.content).toContain('to buy');
     expect(body.messages[1]!.content).toContain('Ella compró un libro.');
+    expect(body.messages[1]!.content).not.toContain('<source-text>');
     expect(body.provider.require_parameters).toBe(true);
     expect(body.max_tokens).toBe(4000);
     expect(body.response_format).toMatchObject({
@@ -192,7 +191,7 @@ describe('study card AI cloze generation', () => {
       json: async () => ({
         choices: [
           {
-            message: { content: structuredCard('Ella {{c1::compró}} un libro.') },
+            message: { content: structuredCard() },
           },
         ],
       }),
@@ -229,8 +228,9 @@ describe('study card AI cloze generation', () => {
         choices: [
           {
             message: {
-              content: structuredCard('The answer is {{c1::clear}}.', {
-                source_text: 'The answer is clear.',
+              content: structuredCard({
+                gloss: 'clear',
+                translation: 'The answer is clear.',
               }),
             },
           },
@@ -266,7 +266,7 @@ describe('study card AI cloze generation', () => {
       json: async () => ({
         choices: [
           {
-            message: { content: structuredCard('Ella {{c1::compró}} un libro.') },
+            message: { content: structuredCard() },
           },
         ],
       }),
@@ -290,6 +290,34 @@ describe('study card AI cloze generation', () => {
     });
   });
 
+  it('defaults study-card translations to English', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: { content: structuredCard() },
+          },
+        ],
+      }),
+    });
+
+    await generateStudyCardCloze({
+      apiKey: 'token',
+      model: 'model',
+      contextText: 'Ella compró un libro.',
+      selectedText: 'compró',
+      definitions: [],
+    });
+
+    const request = JSON.parse(mockFetch.mock.calls[0]![1].body as string) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(request.messages[1]!.content).toContain(
+      `<translation-target-language>\n${DEFAULT_STUDY_CARD_TARGET_LANGUAGE}\n</translation-target-language>`,
+    );
+  });
+
   it('limits reasoning effort when requested for reasoning models', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -297,8 +325,9 @@ describe('study card AI cloze generation', () => {
         choices: [
           {
             message: {
-              content: structuredCard('The answer is {{c1::clear}}.', {
-                source_text: 'The answer is clear.',
+              content: structuredCard({
+                gloss: 'clear',
+                translation: 'The answer is clear.',
               }),
             },
           },
@@ -355,7 +384,7 @@ describe('study card AI cloze generation', () => {
       json: async () => ({
         choices: [
           {
-            message: { content: structuredCard('Ella {{c1::compró}} un libro.') },
+            message: { content: structuredCard() },
           },
         ],
       }),
@@ -384,7 +413,7 @@ describe('study card AI cloze generation', () => {
       json: async () => ({
         choices: [
           {
-            message: { content: structuredCard('Ella {{c1::compró}} un libro.') },
+            message: { content: structuredCard() },
           },
         ],
       }),
@@ -409,7 +438,7 @@ describe('study card AI cloze generation', () => {
       json: async () => ({
         choices: [
           {
-            message: { content: structuredCard('Ella {{c1::compró}} un libro.') },
+            message: { content: structuredCard() },
           },
         ],
       }),
@@ -436,15 +465,17 @@ describe('study card AI cloze generation', () => {
     ).toEqual(['Old study-card template', 'New study-card template']);
   });
 
-  it('rejects output that changes the selected answer or contains multiple clozes', async () => {
-    mockFetch.mockResolvedValueOnce({
+  it('builds the cloze and source text from immutable app data', async () => {
+    mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
         choices: [
           {
             message: {
-              content: structuredCard('Ella {{c1::compró}} y {{c1::leyó}}.', {
-                source_text: 'Ella compró un libro.',
+              content: structuredCard({
+                cloze_hint: 'past tense',
+                cloze_text: 'The model changed this context.',
+                source_text: 'The model changed this source.',
               }),
             },
           },
@@ -457,31 +488,13 @@ describe('study card AI cloze generation', () => {
         model: 'model',
         contextText: 'Ella compró un libro.',
         selectedText: 'compró',
+        selectedSpan: { start: 5, end: 11 },
         definitions: [],
       }),
-    ).rejects.toThrow('one cloze');
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: structuredCard('Ella {{c1::compraría}} un libro.'),
-            },
-          },
-        ],
-      }),
+    ).resolves.toMatchObject({
+      clozeText: 'Ella {{c1::compró::past tense}} un libro.',
+      sourceText: 'Ella compró un libro.',
     });
-    await expect(
-      generateStudyCardCloze({
-        apiKey: 'token',
-        model: 'model',
-        contextText: 'Ella compró un libro.',
-        selectedText: 'compró',
-        definitions: [],
-      }),
-    ).rejects.toThrow('selected text');
   });
 
   it('accepts text content returned as OpenAI content parts', async () => {
@@ -495,7 +508,7 @@ describe('study card AI cloze generation', () => {
               content: [
                 {
                   type: 'text',
-                  text: structuredCard('Ella {{c1::compró}} un libro.'),
+                  text: structuredCard(),
                 },
               ],
             },

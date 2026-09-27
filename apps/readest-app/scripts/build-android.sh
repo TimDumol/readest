@@ -7,6 +7,23 @@ app_root="$(cd -- "$script_dir/.." && pwd)"
 build_mode="${READEST_ANDROID_BUILD_MODE:-debug}"
 target="${READEST_ANDROID_TARGET:-aarch64}"
 
+# Keep local debug installs visibly distinct from a store build. This is
+# especially useful when Android accepts an APK with the same semver/version
+# code and leaves an older WebView bundle running.
+android_version_suffix=""
+if [[ "$build_mode" == debug ]]; then
+  if [[ -v READEST_ANDROID_DEV_VERSION_SUFFIX ]]; then
+    android_version_suffix="$READEST_ANDROID_DEV_VERSION_SUFFIX"
+  else
+    android_version_suffix="-dev$(date -u +%Y%m%d%H%M%S)"
+  fi
+fi
+
+if [[ -n "$android_version_suffix" && ! "$android_version_suffix" =~ ^-[0-9A-Za-z.-]+$ ]]; then
+  printf '%s\n' 'READEST_ANDROID_DEV_VERSION_SUFFIX must be a semver prerelease suffix such as -dev20260920230000.' >&2
+  exit 2
+fi
+
 case "$build_mode" in
   debug|release)
     ;;
@@ -56,6 +73,14 @@ cd "$app_root"
 unset NO_COLOR FORCE_COLOR
 export ANDROID_HOME="$android_sdk"
 export ANDROID_SDK_ROOT="$android_sdk"
+
+base_version="$(node -p "require('./package.json').version")"
+tauri_config_override=""
+if [[ -n "$android_version_suffix" ]]; then
+  tauri_config_override="{\"version\":\"${base_version}${android_version_suffix}\"}"
+  printf 'Using Android development version %s%s\n' "$base_version" "$android_version_suffix"
+fi
+
 repo_root="$(cd -- "$app_root/../.." && pwd)"
 if ! command -v git >/dev/null 2>&1; then
   printf '%s\n' 'git is required to initialize the workspace submodules.' >&2
@@ -81,13 +106,19 @@ printf '%s\n' 'Preparing web assets required by the Android bundle...'
 pnpm setup-vendors
 
 printf 'Building Readest Android APK (%s, %s)...\n' "$build_mode" "$target"
+build_started_at="$(date +%s)"
+build_args=("${build_flag[@]}" -t "$target")
+if [[ -n "$tauri_config_override" ]]; then
+  build_args+=(--config "$tauri_config_override")
+fi
 pnpm exec dotenv -v KEEP_SOURCEMAPS=1 -e .env.tauri -- \
-  pnpm tauri android build "${build_flag[@]}" -t "$target" -- --features devtools
+  pnpm tauri android build "${build_args[@]}" -- --features devtools
 
 apk_source="$(find "$app_root/src-tauri/gen/android/app/build/outputs/apk" \
-  -type f -name "*-${output_suffix}.apk" -print | sort | head -n 1)"
+  -type f -name "*-${output_suffix}.apk" -newermt "@${build_started_at}" \
+  -printf '%T@ %p\n' | sort -nr | sed -n '1s/^[^ ]* //p')"
 if [[ -z "$apk_source" ]]; then
-  printf '%s\n' 'Android build completed, but no APK was found.' >&2
+  printf '%s\n' 'Android build completed, but no fresh APK was found.' >&2
   exit 1
 fi
 

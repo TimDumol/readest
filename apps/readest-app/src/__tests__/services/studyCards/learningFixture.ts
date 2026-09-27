@@ -9,7 +9,7 @@ export const learningFixture = (): StudyCardLearning => ({
     vocabulary: {
       applicable: true,
       reason: 'Useful everyday verb.',
-      prompt: 'Ella [...] un libro. Use the Spanish synonym "adquirió".',
+      prompt: 'Ella [...] un libro.',
       answer: 'compró',
       hint: '',
       alternatives: [],

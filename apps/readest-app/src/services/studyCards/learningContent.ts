@@ -3,11 +3,15 @@ import { EXERCISE_TYPES, type StudyCardExercise, type StudyCardLearning } from '
 const text = { type: 'string' } as const;
 const exerciseProperties = {
   applicable: { type: 'boolean' },
-  reason: text,
-  prompt: text,
+  reason: { type: 'string', description: 'Short reason in the translation target language.' },
+  prompt: {
+    type: 'string',
+    description:
+      'One concise source-language sentence with exactly one [...] blank; no task instruction, answer, gloss, HTML, or Anki syntax.',
+  },
   answer: text,
   hint: text,
-  alternatives: { type: 'array', items: text },
+  alternatives: { type: 'array', items: text, maxItems: 3 },
   explanation: text,
 };
 const exerciseSchema = {
@@ -37,30 +41,29 @@ export const LEARNING_SCHEMA = {
 };
 
 export const LEARNING_INSTRUCTIONS = `
-Also return learning, matching the supplied JSON schema. Generate the shared learning information
-and vocabulary production content in this single response; the interface decides which cards to
-create and selecting cards never makes another AI request.
-gloss must explain ONLY the contextual meaning in the translation target language (English by default).
-learningTarget is the exact contiguous source expression worth learning, containing the selected text;
-it may expand a word to an idiom. lemma is its dictionary/base form. Keep the original selection unchanged.
-grammaticalForm describes the encountered form in the translation target language.
-explanation is an optional simple explanation in the source language; usageNote is a short note
-in the translation target language. Do not list unrelated senses.
-For the vocabulary production exercise, set applicable and provide a short reason in the
-translation target language. Do not force an artificial or redundant exercise. When inapplicable,
-all textual exercise fields and alternatives must be empty; reason should explain why. Vocabulary
-production must teach the learner to produce the target Spanish word/form from a cue: use a different
-Spanish word or phrase as the cue, or English when no suitable Spanish cue exists. The answer must
-be the target word in Spanish. The prompt/front must not contain the selected word, any inflected or
-other form of it, its lemma/base expression, or a recognizable fragment of any of those. Never put
-the answer or the original word in the hint. Use a contextual blank only for the cue, not for the
-target word itself.
-The applicable exercise needs a standalone prompt, answer, and explanation; hint is optional.
-Prompts must be plain text, using [...] for blanks, never Anki syntax or HTML. Include a short
-English task instruction (or use the translation target language). Check whether other common
-words satisfy each prompt: narrow the cue or list valid alternatives; do not claim uniqueness
-when synonyms remain valid. Avoid leaking the answer in the prompt or hint. Preserve accents and
-grammatical agreement. Return vocabulary production content whenever a useful exercise can be made.`;
+When learning is present, generate the shared learning information and vocabulary exercise in this
+same response; the interface chooses which applicable cards to activate.
+learningTarget must be an original contiguous source-language expression containing the selected
+text; it may expand a word to an idiom. lemma is its dictionary/base form. Keep the selected text
+unchanged. grammaticalForm describes the encountered source-language form. explanation is a simple
+optional explanation in the source language; usageNote is a short note in the translation target
+language. Do not list unrelated senses.
+Set vocabulary applicable only when a useful exercise can be made, and always provide a short reason
+in the translation target language. When inapplicable, use empty strings and an empty alternatives
+array for the other exercise fields. The exercise must teach production of learningTarget in its
+source language: use a different source-language word or phrase as the cue, or English when no
+suitable cue exists. answer must be the target expression in its original form. The prompt must not
+contain the selected text, any inflected or other form of it, its lemma/base expression, or a
+recognizable fragment; never put the answer or original word in the hint. Use a contextual blank
+only for the cue.
+Applicable exercises need a standalone plain-text prompt, answer, and explanation; hint may be empty.
+The prompt must be one natural source-language sentence with exactly one [...] blank. It is shown
+directly on the production card, so do not add instructions such as "Fill in..." or "What word
+means...?", and do not put a gloss, answer, explanation, Anki syntax, or HTML in it. The card shows
+the shared Meaning field as the gloss. Account for valid synonyms with narrower cues or alternatives;
+do not claim uniqueness when synonyms remain valid. Preserve accents and grammatical agreement.`;
+
+const CLOZE_BLANK = '[...]';
 
 const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -93,6 +96,16 @@ export const parseLearningContent = (value: unknown): StudyCardLearning => {
       (result.applicable && (!result.prompt || !result.answer || !result.explanation))
     )
       throw new Error('Incomplete exercise content. Generate again.');
+    if (result.applicable) {
+      const blankCount = result.prompt.split(CLOZE_BLANK).length - 1;
+      if (
+        blankCount !== 1 ||
+        result.prompt.includes('{{') ||
+        result.prompt.includes('}}') ||
+        /<[^>]*>/.test(result.prompt)
+      )
+        throw new Error('Invalid production prompt. Generate a single cloze sentence.');
+    }
     parsed[kind] = result.applicable
       ? result
       : {
