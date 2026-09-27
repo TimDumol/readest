@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MdContentCopy, MdRefresh, MdSend } from 'react-icons/md';
 import { PiArrowsClockwise, PiSpinner } from 'react-icons/pi';
+import { impactFeedback } from '@tauri-apps/plugin-haptics';
 
 import Dialog from '@/components/Dialog';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -133,7 +134,7 @@ const formatGenerationDuration = (durationMs: number): string =>
 
 const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, onClose }) => {
   const _ = useTranslation();
-  const { envConfig } = useEnv();
+  const { appService, envConfig } = useEnv();
   const { settings, setSettings, saveSettings } = useSettingsStore();
   const aiSettings = settings?.aiSettings ?? DEFAULT_AI_SETTINGS;
   const settingsRef = useRef(settings);
@@ -672,7 +673,15 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
 
   const addToAnki = () => {
     const request = makeSendRequest();
-    if (request) void sendRequest(request, true);
+    if (!request) return;
+    if (appService?.hasHaptics) {
+      try {
+        void impactFeedback('light').catch(() => {});
+      } catch {
+        /* haptics are best-effort */
+      }
+    }
+    void sendRequest(request, true);
   };
 
   const copy = async () => {
@@ -734,6 +743,27 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
             {_('Review the captured sentence and definitions before copying or sending the card.')}
           </p>
         </div>
+
+        <StudyCardChoices draft={draft} disabled={editingLocked} onChange={updateDraft} />
+
+        <label className='flex flex-col gap-1 text-sm'>
+          <span className='font-medium'>{_('Contextual meaning')}</span>
+          <input
+            disabled={editingLocked}
+            className='input input-bordered w-full'
+            value={draft.gloss}
+            onChange={(event) => setField('gloss', event.target.value)}
+          />
+        </label>
+        <label className='flex flex-col gap-1 text-sm'>
+          <span className='font-medium'>{_('Sentence translation')}</span>
+          <textarea
+            disabled={editingLocked}
+            className='textarea textarea-bordered min-h-20 w-full'
+            value={draft.translation}
+            onChange={(event) => setField('translation', event.target.value)}
+          />
+        </label>
 
         <section className='flex flex-col gap-2'>
           <h3 className='font-semibold'>{_('Selected text')}</h3>
@@ -985,26 +1015,6 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
           </div>
         </section>
 
-        <StudyCardChoices draft={draft} disabled={editingLocked} onChange={updateDraft} />
-
-        <label className='flex flex-col gap-1 text-sm'>
-          <span className='font-medium'>{_('Contextual meaning')}</span>
-          <input
-            disabled={editingLocked}
-            className='input input-bordered w-full'
-            value={draft.gloss}
-            onChange={(event) => setField('gloss', event.target.value)}
-          />
-        </label>
-        <label className='flex flex-col gap-1 text-sm'>
-          <span className='font-medium'>{_('Sentence translation')}</span>
-          <textarea
-            disabled={editingLocked}
-            className='textarea textarea-bordered min-h-20 w-full'
-            value={draft.translation}
-            onChange={(event) => setField('translation', event.target.value)}
-          />
-        </label>
         <label className='flex flex-col gap-1 text-sm'>
           <span className='font-medium'>{_('Source text')}</span>
           <textarea
@@ -1202,12 +1212,6 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
             </button>
           </div>
         )}
-        {sendState.phase === 'success' && (
-          <p className='text-success text-sm'>
-            {_('Added to AnkiDroid')}
-            {sendState.noteId ? ` · ${sendState.noteId}` : ''}
-          </p>
-        )}
         {sendState.phase === 'failure' && (
           <p className='text-error text-sm'>
             {sendState.kind === 'uncertain'
@@ -1215,7 +1219,13 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
               : sendState.message}
           </p>
         )}
-        <div className='flex flex-wrap justify-end gap-2'>
+        <div className='border-base-200 bg-base-100 sticky bottom-0 z-10 -mx-4 flex flex-wrap justify-end gap-2 border-t px-4 py-3'>
+          {sendState.phase === 'success' && (
+            <p className='text-success me-auto flex items-center text-sm' role='status'>
+              {_('Added to AnkiDroid')}
+              {sendState.noteId ? ` · ${sendState.noteId}` : ''}
+            </p>
+          )}
           <button type='button' className='btn btn-ghost' onClick={onClose}>
             {_('Cancel')}
           </button>
@@ -1229,7 +1239,7 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
           </button>
           <button
             type='button'
-            className='btn btn-contrast'
+            className='btn btn-contrast transition-transform duration-100 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50'
             disabled={
               !validation.ok ||
               !!noteError ||
@@ -1238,9 +1248,15 @@ const StudyCardDialog: React.FC<StudyCardDialogProps> = ({ snapshot, entries, on
               editingLocked ||
               sendState.phase === 'success'
             }
+            aria-busy={aiClozeState.phase === 'generating'}
             onClick={addToAnki}
           >
-            <MdSend size={18} /> {_('Add to AnkiDroid')}
+            {aiClozeState.phase === 'generating' ? (
+              <PiSpinner className='size-4 animate-spin' />
+            ) : (
+              <MdSend size={18} />
+            )}{' '}
+            {aiClozeState.phase === 'generating' ? _('Generating…') : _('Add to AnkiDroid')}
           </button>
         </div>
       </div>

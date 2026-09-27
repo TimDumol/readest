@@ -58,7 +58,7 @@ export default function StudyCardChoices({ draft, disabled, onChange }: Props) {
             </label>
             {exercise?.reason && <p className='text-sm'>{exercise.reason}</p>}
             {kind === 'recognition' && (
-              <details className='mt-2 text-sm'>
+              <details className='mt-2 text-sm' open>
                 <summary>{_('Preview')}</summary>
                 <p>
                   {draft.contextText.slice(0, draft.selectedSpan?.start ?? 0)}
